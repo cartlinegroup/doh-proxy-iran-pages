@@ -1,0 +1,13 @@
+{
+  "name": "doh-proxy-iran-pages",
+  "version": "1.0.0",
+  "description": "DNS over HTTPS proxy optimized for Iran using Cloudflare Pages",
+  "main": "_worker.js",
+  "scripts": {
+    "dev": "wrangler pages dev",
+    "deploy": "wrangler pages deploy"
+  },
+  "keywords": ["doh", "dns", "proxy", "iran", "cloudflare"],
+  "author": "Your Name",
+  "license": "MIT"
+}
