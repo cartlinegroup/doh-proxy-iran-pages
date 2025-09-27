@@ -1,4 +1,4 @@
-// فایل: _worker.js (اصلی‌ترین فایل)
+// _worker.js - نسخه اصلاح شده برای مرورگرها
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
@@ -23,7 +23,7 @@ export default {
       })
     }
     
-    // DNS Query API
+    // DNS Query API - پشتیبانی از هر دو فرمت
     if (url.pathname === '/dns-query' || url.pathname === '/resolve') {
       return handleDNSQuery(request, corsHeaders, url)
     }
@@ -44,16 +44,44 @@ export default {
 
 async function handleDNSQuery(request, corsHeaders, url) {
   try {
-    const name = url.searchParams.get('name')
-    const type = url.searchParams.get('type') || 'A'
-    const format = url.searchParams.get('format') || 'full'
+    let name, type = 'A'
+    let isWireFormat = false
     
-    if (!name) {
-      return jsonResponse({
-        error: 'پارامتر "name" ضروری است',
-        example: '/dns-query?name=google.com&type=A',
-        formats: ['full', 'simple']
-      }, 400, corsHeaders)
+    if (request.method === 'GET') {
+      // GET request - معمولاً از مرورگرها
+      name = url.searchParams.get('name')
+      type = url.searchParams.get('type') || 'A'
+      
+      // بررسی اینکه آیا درخواست از مرورگر است (DNS wire format)
+      const acceptHeader = request.headers.get('Accept') || ''
+      isWireFormat = acceptHeader.includes('application/dns-message')
+      
+      if (!name) {
+        // اگر پارامتر name نیست، ممکن است DNS wire format باشد
+        const dnsParam = url.searchParams.get('dns')
+        if (dnsParam) {
+          // Base64 decoded DNS query
+          try {
+            const dnsQuery = base64UrlDecode(dnsParam)
+            return await forwardDNSQuery(dnsQuery, corsHeaders, true)
+          } catch (error) {
+            console.error('DNS wire format error:', error)
+          }
+        }
+        
+        return jsonResponse({
+          error: 'پارامتر "name" ضروری است',
+          example: '/dns-query?name=google.com&type=A',
+          note: 'برای مرورگرها از فرمت DNS wire استفاده می‌شود'
+        }, 400, corsHeaders)
+      }
+    } else if (request.method === 'POST') {
+      // POST request - DNS wire format
+      const contentType = request.headers.get('Content-Type') || ''
+      if (contentType.includes('application/dns-message')) {
+        const dnsQuery = new Uint8Array(await request.arrayBuffer())
+        return await forwardDNSQuery(dnsQuery, corsHeaders, true)
+      }
     }
     
     console.log(`🔍 DNS Query: ${name} (${type})`)
@@ -65,16 +93,45 @@ async function handleDNSQuery(request, corsHeaders, url) {
     const queryParams = new URLSearchParams({
       name: name,
       type: type,
-      cd: 'false',  // DNSSEC validation off
-      do: 'false',  // DNSSEC OK bit off
-      edns_client_subnet: '0.0.0.0/0'  // Privacy
+      cd: 'false',
+      do: 'false',
+      edns_client_subnet: '0.0.0.0/0'
     })
     
     const queryUrl = `${provider.url}?${queryParams.toString()}`
     
+    // تشخیص فرمت مورد نیاز
+    const acceptHeader = request.headers.get('Accept') || ''
+    const needsWireFormat = acceptHeader.includes('application/dns-message')
+    const needsJSON = acceptHeader.includes('application/dns-json') || acceptHeader.includes('application/json')
+    
     // درخواست به DNS provider
     const startTime = Date.now()
-    const dnsResponse = await fetch(queryUrl, {
+    let dnsResponse
+    
+    if (needsWireFormat) {
+      // درخواست wire format
+      dnsResponse = await fetch(queryUrl, {
+        headers: {
+          'Accept': 'application/dns-message',
+          'User-Agent': 'DoH-Iran-Pages/2.0'
+        }
+      })
+      
+      if (dnsResponse.ok) {
+        const wireData = await dnsResponse.arrayBuffer()
+        return new Response(wireData, {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/dns-message',
+            'Cache-Control': 'public, max-age=300'
+          }
+        })
+      }
+    }
+    
+    // پیش‌فرض: JSON format
+    dnsResponse = await fetch(queryUrl, {
       headers: {
         'Accept': 'application/dns-json',
         'User-Agent': 'DoH-Iran-Pages/2.0',
@@ -100,20 +157,6 @@ async function handleDNSQuery(request, corsHeaders, url) {
       timestamp: new Date().toISOString(),
       server: 'Cloudflare-Pages-Iran',
       optimized_for_iran: true
-    }
-    
-    // فرمت ساده اگر درخواست شده
-    if (format === 'simple') {
-      const simplified = {
-        domain: name,
-        type: type,
-        answers: data.Answer?.map(record => ({
-          ip: record.data,
-          ttl: record.TTL
-        })) || [],
-        success: data.Status === 0
-      }
-      return jsonResponse(simplified, 200, corsHeaders)
     }
     
     return jsonResponse(data, 200, corsHeaders, {
@@ -147,6 +190,52 @@ async function handleDNSQuery(request, corsHeaders, url) {
   }
 }
 
+async function forwardDNSQuery(dnsQuery, corsHeaders, isWireFormat = false) {
+  try {
+    // Forward به Cloudflare DoH
+    const response = await fetch('https://cloudflare-dns.com/dns-query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/dns-message',
+        'Accept': 'application/dns-message'
+      },
+      body: dnsQuery
+    })
+    
+    if (!response.ok) {
+      throw new Error(`DNS forward failed: ${response.status}`)
+    }
+    
+    const responseData = await response.arrayBuffer()
+    
+    return new Response(responseData, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/dns-message',
+        'Cache-Control': 'public, max-age=300'
+      }
+    })
+  } catch (error) {
+    console.error('DNS forward error:', error)
+    throw error
+  }
+}
+
+function base64UrlDecode(str) {
+  // Base64 URL safe decoding
+  str = str.replace(/-/g, '+').replace(/_/g, '/')
+  while (str.length % 4) {
+    str += '='
+  }
+  
+  const binary = atob(str)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
 function selectBestProvider(domain) {
   const providers = [
     { 
@@ -160,12 +249,6 @@ function selectBestProvider(domain) {
       url: 'https://dns.google/dns-query',
       priority: 2,
       best_for: ['reliability', 'global']
-    },
-    { 
-      name: 'Quad9-Security', 
-      url: 'https://dns.quad9.net/dns-query',
-      priority: 3,
-      best_for: ['security', 'privacy']
     }
   ]
   
@@ -293,125 +376,39 @@ function getMainPage(hostname) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🇮🇷 DoH Proxy Iran - Cloudflare Pages</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+    <title>🇮🇷 DoH Proxy Iran - Fixed for Browsers</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             color: white;
             direction: rtl;
         }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .hero {
-            text-align: center;
-            padding: 60px 0 40px;
-        }
-        .hero h1 {
-            font-size: 3.5rem;
-            margin-bottom: 20px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-            background: linear-gradient(45deg, #fff, #e3f2fd);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .hero p { font-size: 1.3rem; opacity: 0.9; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .hero { text-align: center; padding: 40px 0; }
+        .hero h1 { font-size: 3rem; margin-bottom: 20px; }
         .endpoint-card {
             background: rgba(255,255,255,0.15);
             backdrop-filter: blur(20px);
             border-radius: 20px;
             padding: 30px;
             margin: 30px 0;
-            border: 1px solid rgba(255,255,255,0.1);
         }
         .endpoint {
             background: linear-gradient(135deg, #4CAF50, #45a049);
             color: white;
             padding: 20px;
             border-radius: 15px;
-            font-family: 'Courier New', monospace;
-            font-size: 1.1rem;
+            font-family: monospace;
             text-align: center;
-            word-break: break-all;
         }
-        .cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 30px;
-            margin: 40px 0;
-        }
-        .card {
+        .setup-instructions {
             background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(20px);
-            border-radius: 20px;
-            padding: 30px;
-            border: 1px solid rgba(255,255,255,0.1);
-            transition: transform 0.3s ease;
-        }
-        .card:hover {
-            transform: translateY(-5px);
-            background: rgba(255,255,255,0.15);
-        }
-        .card h3 {
-            font-size: 1.5rem;
-            margin-bottom: 20px;
-            color: #e3f2fd;
-        }
-        .feature-list {
-            list-style: none;
-            padding: 0;
-        }
-        .feature-list li {
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-        .feature-list li:last-child { border-bottom: none; }
-        .api-example {
-            background: rgba(0,0,0,0.2);
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            border-left: 4px solid #4CAF50;
-        }
-        .btn-group {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin: 30px 0;
-        }
-        .btn {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            padding: 12px 24px;
-            text-decoration: none;
-            border-radius: 25px;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-        .btn:hover {
-            background: rgba(255,255,255,0.3);
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-        }
-        .status-indicator {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            background: #4CAF50;
-            border-radius: 50%;
-            margin-left: 8px;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
         }
         .warning {
             background: rgba(255, 193, 7, 0.2);
@@ -420,16 +417,20 @@ function getMainPage(hostname) {
             border-radius: 15px;
             margin: 20px 0;
         }
+        .btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 25px;
+            margin: 10px;
+            display: inline-block;
+        }
         code {
             background: rgba(0,0,0,0.3);
             padding: 4px 8px;
             border-radius: 5px;
-            font-family: 'Courier New', monospace;
-        }
-        @media (max-width: 768px) {
-            .hero h1 { font-size: 2.5rem; }
-            .cards { grid-template-columns: 1fr; }
-            .btn-group { flex-direction: column; align-items: center; }
+            font-family: monospace;
         }
     </style>
 </head>
@@ -437,96 +438,56 @@ function getMainPage(hostname) {
     <div class="container">
         <div class="hero">
             <h1>🚀 DoH Proxy Iran</h1>
-            <p>DNS over HTTPS با بالاترین کیفیت و سرعت</p>
-            <span class="status-indicator"></span>
-            <span>آنلاین و آماده خدمات‌رسانی</span>
+            <p>نسخه اصلاح شده - سازگار با تمام مرورگرها</p>
         </div>
         
         <div class="endpoint-card">
-            <h2>🌐 Endpoint اصلی</h2>
+            <h2>🌐 Endpoint برای مرورگرها</h2>
             <div class="endpoint">
                 https://${hostname}/dns-query
             </div>
         </div>
         
-        <div class="cards">
-            <div class="card">
-                <h3>⚡ ویژگی‌های پیشرفته</h3>
-                <ul class="feature-list">
-                    <li>🎯 انتخاب هوشمند DNS provider</li>
-                    <li>🚀 Cloudflare Pages Edge Network</li>
-                    <li>🔄 سیستم Fallback خودکار</li>
-                    <li>📊 آمار کامل Query</li>
-                    <li>🇮🇷 بهینه‌سازی ویژه ایران</li>
-                    <li>🛡️ حریم خصوصی محفوظ</li>
-                </ul>
-            </div>
+        <div class="setup-instructions">
+            <h3>🛠️ تنظیمات صحیح مرورگرها:</h3>
             
-            <div class="card">
-                <h3>🛠️ API Examples</h3>
-                
-                <p><strong>Basic Query:</strong></p>
-                <div class="api-example">
-                    GET /dns-query?name=google.com&type=A
-                </div>
-                
-                <p><strong>Simple Format:</strong></p>
-                <div class="api-example">
-                    GET /dns-query?name=github.com&format=simple
-                </div>
-                
-                <p><strong>Iranian Domain:</strong></p>
-                <div class="api-example">
-                    GET /dns-query?name=irna.ir&type=A
-                </div>
-            </div>
+            <p><strong>Firefox:</strong></p>
+            <ol>
+                <li>برو به <code>about:preferences#privacy</code></li>
+                <li><strong>DNS over HTTPS</strong> پیدا کن</li>
+                <li><strong>Custom</strong> انتخاب کن</li>
+                <li>URL: <code>https://${hostname}/dns-query</code></li>
+                <li>Firefox رو restart کن</li>
+            </ol>
             
-            <div class="card">
-                <h3>🔧 تنظیمات مرورگر</h3>
-                
-                <p><strong>Firefox:</strong></p>
-                <p>Settings → Privacy & Security → DNS over HTTPS → Custom</p>
-                <code>https://${hostname}/dns-query</code>
-                
-                <p style="margin-top: 15px;"><strong>Chrome/Edge:</strong></p>
-                <p>Settings → Privacy and security → Security → Use secure DNS</p>
-                <code>https://${hostname}/dns-query</code>
-                
-                <p style="margin-top: 15px;"><strong>Android:</strong></p>
-                <p>Network & Internet → Private DNS</p>
-                <code>${hostname}</code>
-            </div>
-        </div>
-        
-        <div class="btn-group">
-            <a href="/dns-query?name=google.com&type=A" class="btn">📊 تست Google</a>
-            <a href="/dns-query?name=github.com&format=simple" class="btn">🔍 فرمت ساده</a>
-            <a href="/status" class="btn">📈 وضعیت سرورها</a>
-            <a href="/test" class="btn">🧪 تست کامل</a>
+            <p style="margin-top: 20px;"><strong>Chrome/Edge:</strong></p>
+            <ol>
+                <li>برو به <code>chrome://settings/security</code></li>
+                <li><strong>Use secure DNS</strong> فعال کن</li>
+                <li><strong>With: Custom</strong> انتخاب کن</li>
+                <li>URL: <code>https://${hostname}/dns-query</code></li>
+                <li>مرورگر رو restart کن</li>
+            </ol>
         </div>
         
         <div class="warning">
-            <strong>💡 نکته مهم:</strong> این DNS proxy برای دور زدن محدودیت‌های DNS طراحی شده است.
-            برای دسترسی کامل به YouTube و Telegram، استفاده همزمان با VPN توصیه می‌شود.
+            <strong>🔧 اگر هنوز کار نمی‌کنه:</strong><br>
+            1. مرورگر رو کاملاً ببند و دوباره باز کن<br>
+            2. Cache رو پاک کن (Ctrl+Shift+Del)<br>
+            3. از حالت Incognito/Private امتحان کن<br>
+            4. DNS کامپیوتر رو موقتاً به 1.1.1.1 تغییر بده
         </div>
         
+        <center>
+            <a href="/dns-query?name=google.com&type=A" class="btn">📊 تست JSON</a>
+            <a href="/status" class="btn">📈 وضعیت سرورها</a>
+            <a href="/test" class="btn">🧪 تست کامل</a>
+        </center>
+        
         <div style="text-align: center; margin-top: 40px; opacity: 0.8;">
-            <p>🛡️ بدون لاگ‌گیری | 🚀 سرعت بالا | 🔒 رمزگذاری کامل</p>
+            <p>🛡️ پشتیبانی کامل از DNS wire format | 🚀 سازگار با تمام مرورگرها</p>
         </div>
     </div>
-    
-    <script>
-        // تست خودکار در بارگذاری
-        document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                const response = await fetch('/dns-query?name=google.com&type=A');
-                const data = await response.json();
-                console.log('✅ DNS Service Test:', data);
-            } catch (error) {
-                console.log('❌ DNS Service Error:', error);
-            }
-        });
-    </script>
 </body>
 </html>`
 }
