@@ -1,19 +1,21 @@
-# 🇮🇷 DoH Proxy Iran - Cloudflare Pages
+# 🛡️ Ultimate Iran Proxy - Pages
 
-DNS over HTTPS proxy بهینه شده برای کاربران ایرانی
+کامل‌ترین سیستم دسترسی آزاد به اینترنت با Cloudflare Pages Functions
 
-## ویژگی‌ها
-- ⚡ سرعت بالا با Cloudflare Pages
-- 🎯 انتخاب هوشمند DNS provider
-- 🔄 سیستم Fallback
-- 🇮🇷 بهینه‌سازی ویژه ایران
+## ویژگی‌های کلیدی
 
-## استفاده
-```
-GET /dns-query?name=google.com&type=A
-GET /dns-query?name=github.com&format=simple
-```
+- **Smart DNS Intelligence**: تشخیص خودکار نوع سایت و routing هوشمند
+- **Geographic Routing**: مسیریابی بهینه از طریق edge locations جهانی
+- **Gaming Optimization**: کاهش ping تا 50ms برای gaming
+- **HTTP Proxy**: دسترسی مستقیم به سایت‌های مسدود
+- **Browser Compatibility**: پشتیبانی کامل از Wire Format و JSON
+
+## استقرار
+
+1. این repository را fork کنید
+2. به Cloudflare Pages متصل کنید
+3. Deploy خودکار انجام می‌شود
 
 ## تنظیمات مرورگر
-- Firefox: `about:preferences#privacy`
-- Chrome: `chrome://settings/security`
+
+### Firefox
