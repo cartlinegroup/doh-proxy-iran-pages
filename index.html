@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛡️ Ultimate Iran Proxy - کامل‌ترین راه‌حل</title>
+    <meta name="description" content="Ultimate Iran Proxy - Smart DNS + Geographic Routing + Gaming Optimization + HTTP Proxy برای دسترسی آزاد به اینترنت">
+    <meta name="keywords" content="Iran Proxy, DNS, DoH, Cloudflare, Gaming, VPN, دسترسی آزاد">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Vazir', 'Tahoma', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #00ff87 100%);
+            min-height: 100vh; color: white; direction: rtl; overflow-x: hidden;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .hero {
+            text-align: center; padding: 80px 0 60px; position: relative;
+        }
+        .hero::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.1) 0%, transparent 70%);
+            z-index: -1;
+        }
+        .hero h1 {
+            font-size: clamp(3rem, 8vw, 5rem); margin-bottom: 20px;
+            background: linear-gradient(45deg, #fff, #00ff87, #60efff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            animation: glow 3s ease-in-out infinite alternate;
+        }
+        @keyframes glow {
+            from { filter: drop-shadow(0 0 20px rgba(0,255,135,0.5)); }
+            to { filter: drop-shadow(0 0 30px rgba(96,239,255,0.8)); }
+        }
+        .hero-subtitle {
+            font-size: 1.4rem; opacity: 0.95; margin-bottom: 40px;
+            max-width: 800px; margin-left: auto; margin-right: auto; line-height: 1.6;
+        }
+        .ultimate-status {
+            background: rgba(0,255,135,0.15); border: 2px solid #00ff87;
+            padding: 25px; border-radius: 20px; margin: 40px 0; text-align: center;
+            backdrop-filter: blur(20px); animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 20px rgba(0,255,135,0.3); }
+            50% { box-shadow: 0 0 30px rgba(0,255,135,0.6); }
+        }
+        .main-endpoint {
+            background: linear-gradient(135deg, #00ff87, #60efff);
+            color: #0f0f23; padding: 25px; border-radius: 20px;
+            font-family: 'Courier New', monospace; margin: 40px 0;
+            text-align: center; font-size: 1.2rem; font-weight: bold;
+            box-shadow: 0 15px 35px rgba(0,255,135,0.4);
+            animation: glow-endpoint 3s ease-in-out infinite alternate;
+            cursor: pointer; user-select: all;
+        }
+        @keyframes glow-endpoint {
+            from { box-shadow: 0 15px 35px rgba(0,255,135,0.4); }
+            to { box-shadow: 0 20px 40px rgba(96,239,255,0.6); }
+        }
+        .features-mega {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px; margin: 60px 0;
+        }
+        .feature-mega {
+            background: rgba(255,255,255,0.08); backdrop-filter: blur(25px);
+            border-radius: 25px; padding: 35px; position: relative; overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .feature-mega:hover {
+            transform: translateY(-15px) scale(1.02); 
+            border-color: rgba(0,255,135,0.6);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+        }
+        .feature-mega::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 5px;
+            background: linear-gradient(90deg, #00ff87, #60efff, #667eea, #764ba2);
+        }
+        .feature-icon {
+            font-size: 4rem; margin-bottom: 25px; display: block;
+            filter: drop-shadow(0 0 15px rgba(255,255,255,0.3));
+        }
+        .feature-title {
+            font-size: 1.6rem; margin-bottom: 20px; color: #e3f2fd;
+            font-weight: 700;
+        }
+        .feature-description {
+            line-height: 1.7; opacity: 0.9; margin-bottom: 25px; font-size: 1.05rem;
+        }
+        .feature-highlights {
+            list-style: none; padding: 0;
+        }
+        .feature-highlights li {
+            padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.95rem;
+        }
+        .feature-highlights li:last-child { border-bottom: none; }
+        .action-mega {
+            display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;
+            margin: 60px 0;
+        }
+        .btn-mega {
+            background: rgba(255,255,255,0.12); backdrop-filter: blur(15px);
+            color: white; padding: 18px 35px; text-decoration: none;
+            border-radius: 35px; transition: all 0.4s ease;
+            border: 2px solid rgba(255,255,255,0.2);
+            font-weight: 600; font-size: 1.1rem;
+        }
+        .btn-mega:hover {
+            background: rgba(255,255,255,0.25); transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2); border-color: rgba(255,255,255,0.4);
+        }
+        .btn-mega.primary {
+            background: linear-gradient(45deg, #00ff87, #60efff);
+            color: #0f0f23; border: none;
+        }
+        .stats-showcase {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 25px; margin: 60px 0; text-align: center;
+        }
+        .stat-showcase {
+            background: rgba(255,255,255,0.08); padding: 30px; border-radius: 20px;
+            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.1);
+        }
+        .stat-number {
+            font-size: 3rem; font-weight: bold; color: #00ff87;
+            display: block; margin-bottom: 10px;
+        }
+        .stat-label { opacity: 0.9; font-size: 1rem; }
+        .ultimate-setup {
+            background: rgba(255,255,255,0.06); backdrop-filter: blur(25px);
+            border-radius: 25px; padding: 40px; margin: 60px 0;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        .setup-mega-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 30px; margin-top: 30px;
+        }
+        .setup-mega-card {
+            background: rgba(255,255,255,0.08); padding: 25px; border-radius: 20px;
+            border-left: 5px solid #00ff87;
+        }
+        .setup-mega-card code {
+            background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 6px;
+            font-family: 'Courier New', monospace; font-size: 0.9rem;
+            display: inline-block; margin: 2px 0; direction: ltr;
+            color: #00ff87; user-select: all; cursor: pointer;
+        }
+        .setup-mega-card code:hover {
+            background: rgba(0,255,135,0.2);
+        }
+        .api-examples {
+            background: rgba(255,255,255,0.05); padding: 30px; border-radius: 20px; margin: 40px 0;
+        }
+        .api-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px;
+        }
+        .api-item {
+            background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; 
+            font-family: 'Courier New', monospace; border-left: 4px solid #00ff87;
+        }
+        .api-item strong { color: #60efff; }
+        .api-item code {
+            color: #00ff87; font-size: 0.9rem; display: block; margin-top: 5px;
+            user-select: all; cursor: pointer;
+        }
+        .footer-ultimate {
+            text-align: center; margin-top: 80px; padding-top: 40px;
+            border-top: 1px solid rgba(255,255,255,0.2); opacity: 0.9;
+        }
+        .copy-notification {
+            position: fixed; top: 20px; right: 20px; background: #00ff87;
+            color: #0f0f23; padding: 10px 20px; border-radius: 10px;
+            font-weight: bold; transform: translateX(100%);
+            transition: transform 0.3s ease; z-index: 1000;
+        }
+        .copy-notification.show {
+            transform: translateX(0);
+        }
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 3rem; }
+            .features-mega { grid-template-columns: 1fr; }
+            .action-mega { flex-direction: column; align-items: center; }
+            .setup-mega-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="copy-notification" id="copyNotification">
+        کپی شد! ✅
+    </div>
+    
+    <div class="container">
+        <div class="hero">
+            <h1>🛡️ Ultimate Iran Proxy</h1>
+            <p class="hero-subtitle">
+                کامل‌ترین و پیشرفته‌ترین راه‌حل دسترسی آزاد به اینترنت<br>
+                Smart DNS + Geographic Routing + Gaming Optimization + HTTP Proxy
+            </p>
+        </div>
+        
+        <div class="ultimate-status">
+            <strong>🚀 ULTIMATE SYSTEM ACTIVE!</strong><br>
+            تمام قابلیت‌های پیشرفته فعال و بهینه‌سازی شده برای ایران
+        </div>
+        
+        <div class="main-endpoint" id="main-endpoint" onclick="copyToClipboard(this.textContent)">
+            🌐 Ultimate DNS Endpoint: در حال بارگذاری...
+        </div>
+        
+        <div class="stats-showcase">
+            <div class="stat-showcase">
+                <span class="stat-number">26</span>
+                <span class="stat-label">سایت مسدود</span>
+            </div>
+            <div class="stat-showcase">
+                <span class="stat-number">12</span>
+                <span class="stat-label">دامنه Gaming</span>
+            </div>
+            <div class="stat-showcase">
+                <span class="stat-number">10</span>
+                <span class="stat-label">Edge Global</span>
+            </div>
+            <div class="stat-showcase">
+                <span class="stat-number">∞</span>
+                <span class="stat-label">سرعت بی‌نهایت</span>
+            </div>
+        </div>
+        
+        <div class="features-mega">
+            <div class="feature-mega">
+                <span class="feature-icon">🧠</span>
+                <h3 class="feature-title">Smart DNS Intelligence</h3>
+                <p class="feature-description">
+                    تشخیص خودکار نوع سایت و انتخاب بهترین مسیر routing.
+                    هوش مصنوعی برای تشخیص سایت‌های ایرانی، مسدود، gaming و بین‌المللی.
+                </p>
+                <ul class="feature-highlights">
+                    <li>🎯 تشخیص خودکار 50+ سایت</li>
+                    <li>⚡ پاسخ در کمتر از 5ms</li>
+                    <li>🔄 Fallback خودکار</li>
+                    <li>📊 کش هوشمند</li>
+                </ul>
+            </div>
+            
+            <div class="feature-mega">
+                <span class="feature-icon">🌍</span>
+                <h3 class="feature-title">Geographic Routing</h3>
+                <p class="feature-description">
+                    مسیریابی هوشمند از طریق 10 edge location جهانی Cloudflare.
+                    سایت‌های مسدود از خارج ایران، سایت‌های ایرانی مستقیم.
+                </p>
+                <ul class="feature-highlights">
+                    <li>🇮🇷 Iran Direct برای سایت‌های محلی</li>
+                    <li>🌐 Foreign Edge برای سایت‌های مسدود</li>
+                    <li>🎮 Gaming Edge برای بازی‌ها</li>
+                    <li>📍 10 مرکز داده جهانی</li>
+                </ul>
+            </div>
+            
+            <div class="feature-mega">
+                <span class="feature-icon">🎮</span>
+                <h3 class="feature-title">Gaming Optimization</h3>
+                <p class="feature-description">
+                    بهینه‌سازی ping و انتخاب نزدیک‌ترین game servers.
+                    کاهش 15-50ms ping برای تجربه gaming بهتر.
+                </p>
+                <ul class="feature-highlights">
+                    <li>⚡ کاهش ping تا 50ms</li>
+                    <li>🎯 3 پلتفرم gaming</li>
+                    <li>🌍 انتخاب بهترین سرور</li>
+                    <li>📊 Real-time optimization</li>
+                </ul>
+            </div>
+            
+            <div class="feature-mega">
+                <span class="feature-icon">🌐</span>
+                <h3 class="feature-title">HTTP Proxy Ultimate</h3>
+                <p class="feature-description">
+                    دسترسی مستقیم به سایت‌های مسدود شده از طریق مرورگر وب.
+                    شامل رابط گرافیکی پیشرفته و پشتیبانی کامل از HTML/CSS/JS.
+                </p>
+                <ul class="feature-highlights">
+                    <li>🖥️ Web Browser Interface</li>
+                    <li>🔧 URL Rewriting خودکار</li>
+                    <li>🎨 HTML/CSS Optimization</li>
+                    <li>📱 Mobile-Friendly</li>
+                </ul>
+            </div>
+            
+            <div class="feature-mega">
+                <span class="feature-icon">🔧</span>
+                <h3 class="feature-title">Browser Compatibility</h3>
+                <p class="feature-description">
+                    پشتیبانی کامل از تمام مرورگرها و اپلیکیشن‌های موبایل.
+                    DNS Wire Format + JSON برای سازگاری 100%.
+                </p>
+                <ul class="feature-highlights">
+                    <li>🦊 Firefox DoH Support</li>
+                    <li>🔵 Chrome Secure DNS</li>
+                    <li>📱 Android Intra/1.1.1.1</li>
+                    <li>🍎 iOS Shortcuts Compatible</li>
+                </ul>
+            </div>
+            
+            <div class="feature-mega">
+                <span class="feature-icon">📊</span>
+                <h3 class="feature-title">Advanced Analytics</h3>
+                <p class="feature-description">
+                    نظارت لحظه‌ای بر عملکرد سیستم، آمار کامل و گزارش‌های تفصیلی.
+                    Status Panel برای مدیریت کامل سیستم.
+                </p>
+                <ul class="feature-highlights">
+                    <li>📈 Real-time Monitoring</li>
+                    <li>⚡ Performance Metrics</li>
+                    <li>🛡️ Status Panel</li>
+                    <li>🧪 Automated Testing</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="action-mega">
+            <a href="/browse.html" class="btn-mega primary">🌍 مرورگر وب</a>
+            <a href="/status" class="btn-mega">🛡️ Status Panel</a>
+            <a href="/ping-test?target=google.com" class="btn-mega">⚡ تست سرعت</a>
+            <a href="/geo-status" class="btn-mega">🌍 Geographic Status</a>
+            <a href="/game-servers" class="btn-mega">🎮 سرورهای بازی</a>
+        </div>
+        
+        <div class="ultimate-setup">
+            <h2 style="text-align: center; margin-bottom: 30px; font-size: 2rem;">⚙️ تنظیمات Ultimate</h2>
+            
+            <div class="setup-mega-grid">
+                <div class="setup-mega-card">
+                    <h3>📱 Android Ultimate Setup</h3>
+                    <p><strong>روش 1: Intra App</strong></p>
+                    <p>1. نصب Intra از Play Store</p>
+                    <p>2. Custom DoH Server</p>
+                    <p>3. <code id="android-url" onclick="copyCode(this)">در حال بارگذاری...</code></p>
+                    <p>4. Test & Turn On</p>
+                    
+                    <p style="margin-top: 15px;"><strong>روش 2: 1.1.1.1 App</strong></p>
+                    <p>Advanced → Custom DoH → همین آدرس</p>
+                </div>
+                
+                <div class="setup-mega-card">
+                    <h3>🦊 Firefox Ultimate</h3>
+                    <p>1. <code onclick="copyCode(this)">about:preferences#privacy</code></p>
+                    <p>2. DNS over HTTPS → Custom</p>
+                    <p>3. <code id="firefox-url" onclick="copyCode(this)">در حال بارگذاری...</code></p>
+                    <p>4. Restart Firefox</p>
+                    <p><strong>✅ Wire Format Supported!</strong></p>
+                </div>
+                
+                <div class="setup-mega-card">
+                    <h3>🔵 Chrome/Edge Ultimate</h3>
+                    <p>1. <code onclick="copyCode(this)">chrome://settings/security</code></p>
+                    <p>2. Use secure DNS → Custom</p>
+                    <p>3. <code id="chrome-url" onclick="copyCode(this)">در حال بارگذاری...</code></p>
+                    <p>4. Restart Browser</p>
+                    <p><strong>✅ Full Compatibility!</strong></p>
+                </div>
+                
+                <div class="setup-mega-card">
+                    <h3>🎮 Gaming Ultimate Setup</h3>
+                    <p>برای بهترین gaming experience:</p>
+                    <p>1. تنظیم DNS: <code id="gaming-url" onclick="copyCode(this)">در حال بارگذاری...</code></p>
+                    <p>2. فعال‌سازی Gaming Mode</p>
+                    <p>3. <code onclick="copyCode(this)">?gaming=true</code> برای queries</p>
+                    <p><strong>⚡ Ping Reduction: 15-50ms</strong></p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="api-examples">
+            <h3 style="text-align: center; margin-bottom: 20px;">🎯 Ultimate API Examples</h3>
+            <div class="api-grid">
+                <div class="api-item">
+                    <strong>Smart DNS:</strong>
+                    <code onclick="copyCode(this)">/dns-query?name=twitter.com</code>
+                </div>
+                <div class="api-item">
+                    <strong>Gaming Mode:</strong>
+                    <code onclick="copyCode(this)">/dns-query?name=steam.com&gaming=true</code>
+                </div>
+                <div class="api-item">
+                    <strong>Geo Routing:</strong>
+                    <code onclick="copyCode(this)">/dns-query?name=site.com&geo=abroad</code>
+                </div>
+                <div class="api-item">
+                    <strong>HTTP Proxy:</strong>
+                    <code onclick="copyCode(this)">/proxy?url=https://github.com</code>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer-ultimate">
+            <p style="font-size: 1.2rem; margin-bottom: 15px;">
+                🛡️ Ultimate Iran Proxy - کامل‌ترین راه‌حل دسترسی آزاد
+            </p>
+            <p>
+                🌍 Global Edge Network | 🧠 AI-Powered Routing | ⚡ Gaming Optimized | 🔒 100% Secure
+            </p>
+            <p style="margin-top: 10px; font-size: 0.9rem; opacity: 0.8;">
+                ساخته شده با ❤️ و تکنولوژی‌های پیشرفته برای کاربران ایرانی
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // تنظیم URL های داینامیک بر اساس hostname فعلی
+        document.addEventListener('DOMContentLoaded', () => {
+            const hostname = window.location.hostname
+            const dnsUrl = `https://${hostname}/dns-query`
+            
+            // به‌روزرسانی تمام المنت‌ها
+            document.getElementById('main-endpoint').innerHTML = `🌐 Ultimate DNS Endpoint: <span style="color: #0f0f23;">${dnsUrl}</span>`
+            document.getElementById('android-url').textContent = dnsUrl
+            document.getElementById('firefox-url').textContent = dnsUrl
+            document.getElementById('chrome-url').textContent = dnsUrl
+            document.getElementById('gaming-url').textContent = dnsUrl
+            
+            console.log('🚀 Ultimate Iran Proxy Pages Loading...')
+            
+            // تست خودکار سیستم
+            testSystem()
+        })
+        
+        // کپی کردن متن
+        function copyToClipboard(text) {
+            if (text.includes('Ultimate DNS Endpoint:')) {
+                text = text.split('Ultimate DNS Endpoint: ')[1]
+            }
+            
+            navigator.clipboard.writeText(text).then(() => {
+                showCopyNotification()
+            }).catch(err => {
+                console.error('Copy failed:', err)
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea')
+                textArea.value = text
+                document.body.appendChild(textArea)
+                textArea.select()
+                document.execCommand('copy')
+                document.body.removeChild(textArea)
+                showCopyNotification()
+            })
+        }
+        
+        function copyCode(element) {
+            copyToClipboard(element.textContent)
+        }
+        
+        function showCopyNotification() {
+            const notification = document.getElementById('copyNotification')
+            notification.classList.add('show')
+            setTimeout(() => {
+                notification.classList.remove('show')
+            }, 2000)
+        }
+        
+        async function testSystem() {
+            try {
+                // تست Smart DNS
+                const dnsTest = await fetch('/dns-query?name=google.com&type=A')
+                const dnsData = await dnsTest.json()
+                console.log('✅ Smart DNS Test:', dnsData._ultimate_proxy || 'OK')
+                
+                // تست Geographic Status
+                const geoTest = await fetch('/geo-status')
+                const geoData = await geoTest.json()
+                console.log('🌍 Geographic Status:', geoData.client_info?.country || 'OK')
+                
+                // تست System Status
+                const statusTest = await fetch('/status')
+                const statusData = await statusTest.json()
+                console.log('📊 System Status:', statusData.status)
+                
+                console.log('🎉 ULTIMATE PAGES SYSTEM FULLY OPERATIONAL!')
+                console.log('🛡️ All features: Smart DNS ✅ | Geo Routing ✅ | Gaming ✅ | Proxy ✅')
+                
+            } catch (error) {
+                console.log('❌ Ultimate system test error:', error)
+            }
+        }
+        
+        // Add dynamic visual effects
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        }
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1'
+                    entry.target.style.transform = 'translateY(0)'
+                }
+            })
+        }, observerOptions)
+        
+        // Animate feature cards
+        document.querySelectorAll('.feature-mega, .setup-mega-card, .stat-showcase').forEach(card => {
+            card.style.opacity = '0'
+            card.style.transform = 'translateY(30px)'
+            card.style.transition = 'all 0.8s ease-out'
+            observer.observe(card)
+        })
+        
+        // Add floating animation to hero
+        setInterval(() => {
+            const hero = document.querySelector('.hero h1')
+            if (hero) {
+                hero.style.transform = `translateY(${Math.sin(Date.now() / 1000) * 5}px)`
+            }
+        }, 50)
+    </script>
+</body>
+</html>

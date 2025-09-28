@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌐 Ultimate Web Browser - مرورگر وب</title>
+    <meta name="description" content="Ultimate Web Browser - دسترسی امن به سایت‌های مسدود شده">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Vazir', 'Tahoma', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; direction: rtl; color: white;
+        }
+        .browser-container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        .browser-header {
+            background: rgba(255,255,255,0.15); backdrop-filter: blur(30px);
+            border-radius: 20px; padding: 25px; margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .header-title {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .header-title h2 {
+            font-size: 1.8rem; margin: 0;
+        }
+        .home-btn {
+            background: rgba(255,255,255,0.2); color: white;
+            padding: 8px 16px; text-decoration: none; border-radius: 10px;
+            font-size: 14px; transition: all 0.3s;
+        }
+        .home-btn:hover {
+            background: rgba(255,255,255,0.3); transform: translateY(-2px);
+        }
+        .address-bar {
+            display: flex; gap: 15px; align-items: center; margin-bottom: 20px;
+        }
+        .url-input {
+            flex: 1; padding: 15px; border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 10px; font-size: 16px; direction: ltr;
+            background: rgba(255,255,255,0.1); color: white;
+            transition: all 0.3s ease;
+        }
+        .url-input:focus { 
+            border-color: #00ff87; outline: none; 
+            box-shadow: 0 0 15px rgba(0,255,135,0.3);
+        }
+        .url-input::placeholder { color: rgba(255,255,255,0.7); }
+        .nav-buttons {
+            display: flex; gap: 10px;
+        }
+        .nav-btn {
+            background: rgba(255,255,255,0.2); color: white;
+            border: none; padding: 15px; border-radius: 10px; 
+            cursor: pointer; font-size: 16px; font-weight: bold;
+            transition: all 0.3s ease; min-width: 45px;
+        }
+        .nav-btn:hover { 
+            background: rgba(255,255,255,0.3); transform: translateY(-2px); 
+        }
+        .nav-btn:disabled {
+            opacity: 0.5; cursor: not-allowed;
+        }
+        .go-btn {
+            background: linear-gradient(45deg, #00ff87, #60efff); color: #0f0f23;
+            border: none; padding: 15px 30px; border-radius: 10px; 
+            cursor: pointer; font-size: 16px; font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        .go-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,255,135,0.3); }
+        .shortcuts { 
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); 
+            gap: 10px; margin-top: 15px; 
+        }
+        .shortcut-btn {
+            background: rgba(255,255,255,0.2); color: white;
+            padding: 10px 15px; text-decoration: none; border-radius: 15px;
+            font-size: 14px; transition: all 0.3s; text-align: center;
+            cursor: pointer; border: none;
+        }
+        .shortcut-btn:hover { 
+            background: rgba(255,255,255,0.3); transform: translateY(-2px); 
+        }
+        .iframe-container {
+            background: white; border-radius: 20px; overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3); height: 80vh;
+            position: relative;
+        }
+        #content-frame { 
+            width: 100%; height: calc(100% - 50px); border: none; 
+            background: white;
+        }
+        .status-bar {
+            background: linear-gradient(135deg, #667eea, #764ba2); 
+            padding: 12px 20px; font-size: 14px; color: white;
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 2px solid rgba(255,255,255,0.2);
+        }
+        .status-indicator { 
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%; 
+            background: #4CAF50; margin-left: 8px; animation: blink 2s infinite;
+        }
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+        .loading-bar {
+            position: absolute; top: 0; left: 0; height: 3px;
+            background: linear-gradient(90deg, #00ff87, #60efff);
+            width: 0%; transition: width 0.3s ease; z-index: 10;
+        }
+        .error-page {
+            display: none; padding: 40px; text-align: center;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white; height: 100%;
+        }
+        .error-page h3 {
+            font-size: 2rem; margin-bottom: 20px;
+        }
+        .quick-actions {
+            display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;
+        }
+        .quick-btn {
+            background: rgba(0,255,135,0.2); color: white;
+            padding: 8px 16px; border: none; border-radius: 8px;
+            cursor: pointer; font-size: 14px; transition: all 0.3s;
+        }
+        .quick-btn:hover {
+            background: rgba(0,255,135,0.4); transform: translateY(-1px);
+        }
+        @media (max-width: 768px) {
+            .address-bar { flex-direction: column; gap: 10px; }
+            .nav-buttons { justify-content: center; }
+            .shortcuts { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
+            .quick-actions { justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="browser-container">
+        <div class="browser-header">
+            <div class="header-title">
+                <h2>🌐 Ultimate Web Browser</h2>
+                <a href="/" class="home-btn">🏠 صفحه اصلی</a>
+            </div>
+            <p style="margin-bottom: 15px; opacity: 0.9;">دسترسی امن و هوشمند به تمام سایت‌ها</p>
+            
+            <div class="address-bar">
+                <div class="nav-buttons">
+                    <button onclick="goBack()" class="nav-btn" id="backBtn" disabled title="برگشت">←</button>
+                    <button onclick="goForward()" class="nav-btn" id="forwardBtn" disabled title="جلو">→</button>
+                    <button onclick="refreshPage()" class="nav-btn" title="تازه‌سازی">↻</button>
+                </div>
+                <input type="text" id="urlInput" class="url-input" 
+                       placeholder="https://twitter.com یا github.com وارد کنید..." 
+                       value="">
+                <button onclick="loadPage()" class="go-btn">🚀 برو</button>
+            </div>
+            
+            <div class="shortcuts">
+                <strong style="grid-column: 1/-1; margin-bottom: 10px; font-size: 0.9rem;">🔥 محبوب‌ترین سایت‌ها:</strong>
+                <button onclick="loadUrl('https://twitter.com')" class="shortcut-btn">🐦 Twitter</button>
+                <button onclick="loadUrl('https://github.com')" class="shortcut-btn">💻 GitHub</button>
+                <button onclick="loadUrl('https://youtube.com')" class="shortcut-btn">📺 YouTube</button>
+                <button onclick="loadUrl('https://reddit.com')" class="shortcut-btn">🤖 Reddit</button>
+                <button onclick="loadUrl('https://instagram.com')" class="shortcut-btn">📷 Instagram</button>
+                <button onclick="loadUrl('https://discord.com')" class="shortcut-btn">🎮 Discord</button>
+                <button onclick="loadUrl('https://medium.com')" class="shortcut-btn">📝 Medium</button>
+                <button onclick="loadUrl('https://wikipedia.org')" class="shortcut-btn">📚 Wikipedia</button>
+            </div>
+            
+            <div class="quick-actions">
+                <button onclick="loadUrl('https://google.com')" class="quick-btn">🔍 Google</button>
+                <button onclick="loadUrl('https://stackoverflow.com')" class="quick-btn">💡 Stack Overflow</button>
+                <button onclick="loadUrl('https://news.ycombinator.com')" class="quick-btn">📰 Hacker News</button>
+                <button onclick="checkStatus()" class="quick-btn">🛡️ Status</button>
+            </div>
+        </div>
+        
+        <div class="iframe-container">
+            <div class="loading-bar" id="loadingBar"></div>
+            <div class="status-bar">
+                <span>
+                    <span class="status-indicator"></span>
+                    <span id="status">آماده برای مرورگری امن...</span>
+                </span>
+                <span id="proxy-status">🛡️ Ultimate Proxy فعال</span>
+            </div>
+            
+            <iframe id="content-frame" src="about:blank"></iframe>
+            
+            <div class="error-page" id="errorPage">
+                <h3>❌ خطا در بارگذاری</h3>
+                <p>متأسفانه نتوانستیم صفحه مورد نظر را بارگذاری کنیم.</p>
+                <div style="margin: 20px 0;">
+                    <p>ممکن است دلایل زیر باشد:</p>
+                    <ul style="text-align: right; margin: 10px 0; padding-right: 20px;">
+                        <li>سایت در دسترس نباشد</li>
+                        <li>URL اشتباه باشد</li>
+                        <li>سایت محدودیت‌های خاصی داشته باشد</li>
+                    </ul>
+                </div>
+                <button onclick="retryLoad()" class="quick-btn" style="font-size: 16px; padding: 12px 24px;">🔄 تلاش مجدد</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // تاریخچه مرورگر
+        let history = []
+        let currentIndex = -1
+        let currentUrl = ''
+        
+        function loadPage() {
+            const url = document.getElementById('urlInput').value.trim();
+            if (url) {
+                loadUrl(url);
+            }
+        }
+        
+        function loadUrl(url) {
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                url = 'https://' + url;
+            }
+            
+            // اضافه کردن به تاریخچه
+            if (url !== currentUrl) {
+                history = history.slice(0, currentIndex + 1)
+                history.push(url)
+                currentIndex = history.length - 1
+                updateNavigationButtons()
+            }
+            
+            currentUrl = url
+            const proxyUrl = `/p/${url}`;
+            const frame = document.getElementById('content-frame');
+            const status = document.getElementById('status');
+            const loadingBar = document.getElementById('loadingBar');
+            const errorPage = document.getElementById('errorPage');
+            
+            // نمایش loading
+            status.innerHTML = '<span class="status-indicator"></span>در حال بارگذاری...';
+            loadingBar.style.width = '30%';
+            frame.style.display = 'block';
+            errorPage.style.display = 'none';
+            
+            // تنظیم URL در آدرس بار
+            document.getElementById('urlInput').value = url;
+            
+            // بارگذاری صفحه
+            frame.src = proxyUrl;
+            
+            // شبیه‌سازی پیشرفت بارگذاری
+            setTimeout(() => {
+                loadingBar.style.width = '60%';
+            }, 500);
+            
+            setTimeout(() => {
+                loadingBar.style.width = '90%';
+            }, 1000);
+            
+            frame.onload = function() {
+                loadingBar.style.width = '100%';
+                setTimeout(() => {
+                    loadingBar.style.width = '0%';
+                }, 500);
+                
+                status.innerHTML = '<span class="status-indicator"></span>✅ بارگذاری موفق: ' + extractDomain(url);
+                
+                // تغییر title صفحه
+                document.title = `${extractDomain(url)} - Ultimate Web Browser`;
+            };
+            
+            frame.onerror = function() {
+                showError();
+            };
+            
+            // timeout برای خطاهای شبکه
+            setTimeout(() => {
+                if (loadingBar.style.width !== '0%' && loadingBar.style.width !== '100%') {
+                    showError();
+                }
+            }, 10000);
+        }
+        
+        function showError() {
+            const loadingBar = document.getElementById('loadingBar');
+            const status = document.getElementById('status');
+            const frame = document.getElementById('content-frame');
+            const errorPage = document.getElementById('errorPage');
+            
+            loadingBar.style.width = '0%';
+            status.innerHTML = '<span class="status-indicator" style="background: #f44336;"></span>❌ خطا در بارگذاری';
+            frame.style.display = 'none';
+            errorPage.style.display = 'block';
+        }
+        
+        function retryLoad() {
+            const url = document.getElementById('urlInput').value;
+            if (url) {
+                loadUrl(url);
+            }
+        }
+        
+        function goBack() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                const url = history[currentIndex];
+                document.getElementById('urlInput').value = url;
+                loadUrlDirect(url);
+                updateNavigationButtons();
+            }
+        }
+        
+        function goForward() {
+            if (currentIndex < history.length - 1) {
+                currentIndex++;
+                const url = history[currentIndex];
+                document.getElementById('urlInput').value = url;
+                loadUrlDirect(url);
+                updateNavigationButtons();
+            }
+        }
+        
+        function loadUrlDirect(url) {
+            currentUrl = url;
+            const proxyUrl = `/p/${url}`;
+            const frame = document.getElementById('content-frame');
+            frame.src = proxyUrl;
+        }
+        
+        function refreshPage() {
+            const frame = document.getElementById('content-frame');
+            frame.src = frame.src;
+        }
+        
+        function updateNavigationButtons() {
+            document.getElementById('backBtn').disabled = currentIndex <= 0;
+            document.getElementById('forwardBtn').disabled = currentIndex >= history.length - 1;
+        }
+        
+        function extractDomain(url) {
+            try {
+                return new URL(url).hostname;
+            } catch {
+                return url;
+            }
+        }
+        
+        function checkStatus() {
+            window.open('/status', '_blank');
+        }
+        
+        // Event listeners
+        document.getElementById('urlInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadPage();
+            }
+        });
+        
+        // Focus on URL input when Ctrl+L is pressed
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                document.getElementById('urlInput').focus();
+                document.getElementById('urlInput').select();
+            }
+        });
+        
+        // Auto-load GitHub as demo after 2 seconds
+        setTimeout(() => {
+            if (!currentUrl) {
+                loadUrl('https://github.com');
+            }
+        }, 2000);
+        
+        // اطلاع‌رسانی خوش‌آمدگویی
+        setTimeout(() => {
+            console.log('🌐 Ultimate Web Browser loaded successfully!');
+            console.log('🛡️ All blocked sites are accessible through Ultimate Proxy');
+            console.log('💡 Tips: Use Ctrl+L to focus address bar');
+        }, 1000);
+    </script>
+</body>
+</html>

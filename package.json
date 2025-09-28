@@ -7,7 +7,16 @@
     "dev": "wrangler pages dev",
     "deploy": "wrangler pages deploy"
   },
-  "keywords": ["doh", "dns", "proxy", "iran", "cloudflare"],
+  "keywords": [
+    "doh",
+    "dns",
+    "proxy",
+    "iran",
+    "cloudflare"
+  ],
   "author": "Your Name",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.40.2"
+  }
 }
