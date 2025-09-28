@@ -1,4 +1,4 @@
-// _worker.js - Enhanced with Geographic Routing
+// _worker.js - Compatible with Browsers (DNS Wire Format + JSON)
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
@@ -7,7 +7,7 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Accept, User-Agent, CF-Connecting-IP',
+      'Access-Control-Allow-Headers': 'Content-Type, Accept, User-Agent',
       'Access-Control-Max-Age': '86400'
     }
     
@@ -32,19 +32,14 @@ export default {
       return handleProxy(request, corsHeaders, url)
     }
     
-    // Geographic Status
-    if (url.pathname === '/geo-status') {
-      return handleGeoStatus(request, corsHeaders)
-    }
-    
     // Status
     if (url.pathname === '/status') {
       return jsonResponse({
         status: 'OK',
         timestamp: new Date().toISOString(),
-        service: 'Iran Smart Proxy - Geographic Enhanced',
-        version: '3.0-geo',
-        supports: ['DNS JSON', 'DNS Wire Format', 'HTTP Proxy', 'Geographic Routing']
+        service: 'Iran Smart Proxy - Browser Compatible',
+        version: '2.1-browser-fix',
+        supports: ['DNS JSON', 'DNS Wire Format', 'HTTP Proxy']
       }, 200, corsHeaders)
     }
     
@@ -52,68 +47,42 @@ export default {
   }
 }
 
-// تنظیمات Geographic Routing
-const GEO_CONFIG = {
-  // سایت‌های ایرانی - از Iran Edge
-  iranian_sites: [
-    '.ir', '.ایران', 'irna.ir', 'tasnim.ir', 'mehr.ir', 'digikala.com',
-    'aparat.com', 'snapp.ir', 'cafe-bazaar.ir', 'shaparak.ir'
-  ],
-  
-  // سایت‌های مسدود - حتماً از خارج ایران
-  blocked_sites: [
-    'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'youtube.com',
-    'telegram.org', 'discord.com', 'reddit.com', 'github.com', 'medium.com',
-    'bbc.com', 'cnn.com', 'wikipedia.org', 'linkedin.com', 'tiktok.com'
-  ],
-  
-  // Gaming sites - نزدیک‌ترین edge برای کمترین ping
-  gaming_sites: [
-    'steampowered.com', 'steamcommunity.com', 'riotgames.com', 
-    'leagueoflegends.com', 'valorant.com', 'epicgames.com', 'battle.net',
-    'ea.com', 'ubisoft.com', 'origin.com', 'gog.com'
-  ],
-  
-  // Cloudflare Edge Locations بهینه برای ایران
-  preferred_edges: {
-    iran_domestic: ['IKA', 'THR'], // Tehran
-    middle_east: ['DXB', 'AUH'], // Dubai, Abu Dhabi
-    europe: ['IST', 'FRA', 'AMS'], // Istanbul, Frankfurt, Amsterdam
-    gaming_optimized: ['DXB', 'IST', 'FRA'] // کمترین ping برای gaming
-  }
-}
-
-// سایت‌های مسدود (مجموعه کامل)
-const BLOCKED_SITES = GEO_CONFIG.blocked_sites
+// سایت‌های مسدود
+const BLOCKED_SITES = [
+  'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'youtube.com',
+  'telegram.org', 'discord.com', 'reddit.com', 'github.com', 'medium.com',
+  'bbc.com', 'cnn.com', 'wikipedia.org'
+]
 
 // سایت‌های ایرانی
-const IRANIAN_SITES = GEO_CONFIG.iranian_sites
+const IRANIAN_SITES = [
+  '.ir', '.ایران', 'irna.ir', 'tasnim.ir', 'mehr.ir', 'digikala.com'
+]
 
 // Gaming domains
-const GAMING_DOMAINS = GEO_CONFIG.gaming_sites
+const GAMING_DOMAINS = [
+  'steampowered.com', 'steamcommunity.com', 'riotgames.com', 
+  'leagueoflegends.com', 'valorant.com', 'epicgames.com'
+]
 
-// IP های Cloudflare برای proxy
+// Cloudflare IPs
 const CF_IPS = [
-  '104.16.132.229', '104.16.133.229', '172.67.69.9', '172.67.70.9',
-  '104.21.34.96', '172.67.161.180', '104.26.10.78', '185.199.108.153'
+  '104.16.132.229', '104.16.133.229', '172.67.69.9', '172.67.70.9'
 ]
 
 async function handleDNS(request, corsHeaders, url) {
   try {
-    // دریافت اطلاعات جغرافیایی کلاینت
-    const clientCountry = request.cf?.country || 'IR'
-    const clientColo = request.cf?.colo || 'IKA'
-    const isFromIran = clientCountry === 'IR'
-    
     let dnsQuery = null
     let name = null
     let type = 'A'
     
     // تشخیص نوع درخواست
     if (request.method === 'GET') {
+      // GET request - JSON یا Wire format
       name = url.searchParams.get('name')
       type = url.searchParams.get('type') || 'A'
       
+      // بررسی DNS wire format در URL (base64)
       const dnsParam = url.searchParams.get('dns')
       if (dnsParam) {
         try {
@@ -123,6 +92,7 @@ async function handleDNS(request, corsHeaders, url) {
         }
       }
     } else if (request.method === 'POST') {
+      // POST request - DNS wire format
       const contentType = request.headers.get('Content-Type') || ''
       if (contentType.includes('application/dns-message')) {
         dnsQuery = new Uint8Array(await request.arrayBuffer())
@@ -131,9 +101,10 @@ async function handleDNS(request, corsHeaders, url) {
     
     // اگر wire format داریم، forward کن
     if (dnsQuery) {
-      return await forwardDNSWireFormat(dnsQuery, corsHeaders, clientCountry, clientColo)
+      return await forwardDNSWireFormat(dnsQuery, corsHeaders)
     }
     
+    // اگر name نداریم، خطا
     if (!name) {
       return jsonResponse({
         error: 'پارامتر name ضروری است',
@@ -144,38 +115,37 @@ async function handleDNS(request, corsHeaders, url) {
       }, 400, corsHeaders)
     }
     
-    console.log(`🌍 DNS Query: ${name} from ${clientCountry}/${clientColo}`)
+    console.log(`🔍 DNS Query: ${name}`)
     
-    // تشخیص Accept header
+    // تشخیص Accept header برای فرمت پاسخ
     const acceptHeader = request.headers.get('Accept') || ''
     const wantsWireFormat = acceptHeader.includes('application/dns-message')
+    const wantsJSON = acceptHeader.includes('application/dns-json') || 
+                     acceptHeader.includes('application/json') ||
+                     !wantsWireFormat // پیش‌فرض JSON
     
     // تشخیص نوع سایت
     const siteType = getSiteType(name)
-    const gaming = url.searchParams.get('gaming') === 'true' || siteType === 'gaming'
+    const gaming = url.searchParams.get('gaming') === 'true'
     
-    // انتخاب بهترین DNS provider با Geographic Routing
-    const dnsProvider = selectOptimalDNSProvider(siteType, isFromIran, clientColo)
+    // انتخاب بهترین DNS provider
+    let dnsProvider = 'https://cloudflare-dns.com/dns-query'
     
+    // درخواست به DNS provider
     const queryUrl = `${dnsProvider}?name=${encodeURIComponent(name)}&type=${type}`
+    
     const startTime = Date.now()
     
-    // درخواست با Geographic Headers
-    const dnsHeaders = {
-      'Accept': wantsWireFormat ? 'application/dns-message' : 'application/dns-json',
-      'User-Agent': 'Iran-Proxy-Geo/1.0',
-      'CF-IPCountry': isFromIran ? 'XX' : clientCountry, // Hide Iran origin for blocked sites
-      'X-Forwarded-For': isFromIran && siteType === 'blocked' ? '8.8.8.8' : undefined
-    }
-    
-    // حذف undefined headers
-    Object.keys(dnsHeaders).forEach(key => 
-      dnsHeaders[key] === undefined && delete dnsHeaders[key]
-    )
-    
+    // درخواست wire format یا JSON بسته به نیاز
     let dnsResponse
     if (wantsWireFormat) {
-      dnsResponse = await fetch(queryUrl, { headers: dnsHeaders })
+      // درخواست wire format
+      dnsResponse = await fetch(queryUrl, {
+        headers: {
+          'Accept': 'application/dns-message',
+          'User-Agent': 'Iran-Proxy-Browser/1.0'
+        }
+      })
       
       if (dnsResponse.ok) {
         const wireData = await dnsResponse.arrayBuffer()
@@ -183,16 +153,19 @@ async function handleDNS(request, corsHeaders, url) {
           headers: {
             ...corsHeaders,
             'Content-Type': 'application/dns-message',
-            'Cache-Control': 'public, max-age=300',
-            'X-Geo-Route': getRoutingStrategy(siteType, isFromIran),
-            'X-Edge-Colo': clientColo
+            'Cache-Control': 'public, max-age=300'
           }
         })
       }
     }
     
-    // JSON format
-    dnsResponse = await fetch(queryUrl, { headers: dnsHeaders })
+    // پیش‌فرض: JSON format
+    dnsResponse = await fetch(queryUrl, {
+      headers: {
+        'Accept': 'application/dns-json',
+        'User-Agent': 'Iran-Proxy-JSON/1.0'
+      }
+    })
     
     if (!dnsResponse.ok) {
       throw new Error(`DNS failed: ${dnsResponse.status}`)
@@ -201,51 +174,28 @@ async function handleDNS(request, corsHeaders, url) {
     const data = await dnsResponse.json()
     const queryTime = Date.now() - startTime
     
-    // Smart Proxy Logic با Geographic Intelligence
+    // Smart Proxy Logic
     if (siteType === 'blocked' && data.Answer) {
       data.Answer = data.Answer.map(record => {
         if (record.type === 1) { // A record
-          const cfIP = selectOptimalCFIP(name, record.data, clientCountry, clientColo)
+          const cfIP = CF_IPS[Math.floor(Math.random() * CF_IPS.length)]
           return {
             ...record,
             data: cfIP,
             TTL: 300,
             _original: record.data,
-            _proxied: true,
-            _geo_optimized: true
+            _proxied: true
           }
         }
         return record
       })
     }
     
-    // Gaming optimization با Geographic routing
-    if (gaming && data.Answer) {
-      data.Answer = data.Answer.map(record => {
-        if (record.type === 1) {
-          const optimizedIP = optimizeGamingIP(record.data, name, clientColo)
-          return {
-            ...record,
-            data: optimizedIP,
-            _gaming_optimized: optimizedIP !== record.data,
-            _geo_route: getGamingRoute(clientColo)
-          }
-        }
-        return record
-      })
-    }
-    
-    // اضافه کردن Geographic metadata
+    // Add metadata
     data._iran_proxy = {
       site_type: siteType,
       gaming_mode: gaming,
       proxy_applied: siteType === 'blocked',
-      geo_routing: {
-        client_country: clientCountry,
-        client_colo: clientColo,
-        routing_strategy: getRoutingStrategy(siteType, isFromIran),
-        dns_provider: dnsProvider.split('/')[2]
-      },
       query_time_ms: queryTime,
       timestamp: new Date().toISOString(),
       format: 'JSON'
@@ -254,8 +204,7 @@ async function handleDNS(request, corsHeaders, url) {
     return jsonResponse(data, 200, corsHeaders, {
       'Cache-Control': 'public, max-age=300',
       'X-Site-Type': siteType,
-      'X-Query-Time': `${queryTime}ms`,
-      'X-Geo-Route': getRoutingStrategy(siteType, isFromIran)
+      'X-Query-Time': `${queryTime}ms`
     })
     
   } catch (error) {
@@ -267,28 +216,17 @@ async function handleDNS(request, corsHeaders, url) {
   }
 }
 
-async function forwardDNSWireFormat(dnsQuery, corsHeaders, clientCountry, clientColo) {
+async function forwardDNSWireFormat(dnsQuery, corsHeaders) {
   try {
-    console.log(`🔄 Forwarding DNS wire format from ${clientCountry}/${clientColo}`)
+    console.log('🔄 Forwarding DNS wire format query')
     
-    // انتخاب endpoint بر اساس موقعیت
-    const isFromIran = clientCountry === 'IR'
-    let endpoint = 'https://cloudflare-dns.com/dns-query'
-    
-    // برای کاربران ایرانی و سایت‌های حساس، از edge خارجی استفاده کن
-    if (isFromIran) {
-      // Force routing through non-Iran edges
-      endpoint = 'https://dns.google/dns-query' // Google has better geo distribution
-    }
-    
-    const response = await fetch(endpoint, {
+    // Forward به Cloudflare DoH
+    const response = await fetch('https://cloudflare-dns.com/dns-query', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/dns-message',
         'Accept': 'application/dns-message',
-        'User-Agent': 'Iran-Proxy-Wire-Geo/1.0',
-        'CF-IPCountry': isFromIran ? 'AE' : clientCountry, // Mask Iran origin
-        'X-Forwarded-For': isFromIran ? '185.25.182.1' : undefined // Dubai IP
+        'User-Agent': 'Iran-Proxy-Wire/1.0'
       },
       body: dnsQuery
     })
@@ -304,9 +242,7 @@ async function forwardDNSWireFormat(dnsQuery, corsHeaders, clientCountry, client
         ...corsHeaders,
         'Content-Type': 'application/dns-message',
         'Cache-Control': 'public, max-age=300',
-        'X-Proxy-Format': 'Wire',
-        'X-Geo-Route': isFromIran ? 'iran-masked' : 'direct',
-        'X-Edge-Used': isFromIran ? 'external' : 'auto'
+        'X-Proxy-Format': 'Wire'
       }
     })
   } catch (error) {
@@ -315,145 +251,8 @@ async function forwardDNSWireFormat(dnsQuery, corsHeaders, clientCountry, client
   }
 }
 
-// انتخاب بهترین DNS provider
-function selectOptimalDNSProvider(siteType, isFromIran, clientColo) {
-  switch (siteType) {
-    case 'iranian':
-      // سایت‌های ایرانی: از نزدیک‌ترین edge
-      return 'https://cloudflare-dns.com/dns-query'
-      
-    case 'blocked':
-      // سایت‌های مسدود: حتماً از خارج ایران
-      if (isFromIran) {
-        return 'https://dns.google/dns-query' // Google has good global presence
-      }
-      return 'https://cloudflare-dns.com/dns-query'
-      
-    case 'gaming':
-      // Gaming: کمترین latency
-      if (['IKA', 'THR'].includes(clientColo)) {
-        return 'https://cloudflare-dns.com/dns-query' // Dubai edge usually
-      }
-      return 'https://dns.quad9.net/dns-query'
-      
-    default:
-      return 'https://cloudflare-dns.com/dns-query'
-  }
-}
-
-// انتخاب بهترین Cloudflare IP
-function selectOptimalCFIP(domain, originalIP, clientCountry, clientColo) {
-  // IP ranges بهینه بر اساس موقعیت کلاینت
-  const geoOptimizedIPs = {
-    'IR': {
-      // برای کاربران ایرانی - از Dubai/Turkey edges
-      'dubai': ['104.16.132.229', '104.16.133.229'],
-      'turkey': ['172.67.69.9', '172.67.70.9'],
-      'europe': ['104.21.34.96', '172.67.161.180']
-    },
-    'default': ['185.199.108.153', '104.26.10.78']
-  }
-  
-  let availableIPs = geoOptimizedIPs[clientCountry] || geoOptimizedIPs['default']
-  
-  // اگر array نیست، تبدیل کن
-  if (typeof availableIPs === 'object' && !Array.isArray(availableIPs)) {
-    // برای ایران، اولویت با Dubai
-    if (clientCountry === 'IR') {
-      availableIPs = [...availableIPs.dubai, ...availableIPs.turkey, ...availableIPs.europe]
-    } else {
-      availableIPs = geoOptimizedIPs['default']
-    }
-  }
-  
-  // انتخاب IP بر اساس hash domain
-  const hash = domain.split('').reduce((a, b) => {
-    a = ((a << 5) - a) + b.charCodeAt(0)
-    return a & a
-  }, 0)
-  
-  return availableIPs[Math.abs(hash) % availableIPs.length]
-}
-
-// بهینه‌سازی Gaming IP
-function optimizeGamingIP(originalIP, domain, clientColo) {
-  // Gaming servers نزدیک به ایران
-  const gamingOptimizations = {
-    'steampowered.com': {
-      'IKA': '185.25.182.52', // Dubai Steam
-      'THR': '185.25.182.52',
-      'default': '162.254.197.85'
-    },
-    'leagueoflegends.com': {
-      'IKA': '162.249.72.1', // Turkey EUNE
-      'THR': '162.249.72.1',
-      'default': '162.249.73.1'
-    },
-    'epicgames.com': {
-      'IKA': '13.226.238.76', // ME region
-      'THR': '13.226.238.76',
-      'default': '13.35.67.15'
-    }
-  }
-  
-  for (const [gameDomain, coloIPs] of Object.entries(gamingOptimizations)) {
-    if (domain.includes(gameDomain)) {
-      return coloIPs[clientColo] || coloIPs['default'] || originalIP
-    }
-  }
-  
-  return originalIP
-}
-
-// استراتژی routing
-function getRoutingStrategy(siteType, isFromIran) {
-  if (siteType === 'blocked' && isFromIran) {
-    return 'iran-masked-external'
-  } else if (siteType === 'iranian') {
-    return 'local-optimized'
-  } else if (siteType === 'gaming') {
-    return 'latency-optimized'
-  }
-  return 'standard'
-}
-
-// مسیر Gaming
-function getGamingRoute(clientColo) {
-  const routes = {
-    'IKA': 'Tehran→Dubai',
-    'THR': 'Tehran→Dubai', 
-    'DXB': 'Dubai-Direct',
-    'IST': 'Istanbul-Direct',
-    'FRA': 'Frankfurt-Direct'
-  }
-  return routes[clientColo] || 'Auto-Route'
-}
-
-// Geographic Status
-async function handleGeoStatus(request, corsHeaders) {
-  const clientCountry = request.cf?.country || 'Unknown'
-  const clientColo = request.cf?.colo || 'Unknown'
-  const clientIP = request.headers.get('CF-Connecting-IP') || 'Unknown'
-  
-  return jsonResponse({
-    geographic_info: {
-      country: clientCountry,
-      datacenter: clientColo,
-      client_ip: clientIP,
-      is_iran: clientCountry === 'IR'
-    },
-    routing_strategy: {
-      iranian_sites: 'Local-Optimized',
-      blocked_sites: clientCountry === 'IR' ? 'External-Masked' : 'Direct',
-      gaming_sites: 'Latency-Optimized',
-      normal_sites: 'Standard'
-    },
-    available_edges: GEO_CONFIG.preferred_edges,
-    optimization_status: 'Active'
-  }, 200, corsHeaders)
-}
-
 function base64UrlDecode(str) {
+  // Base64 URL safe decoding
   str = str.replace(/-/g, '+').replace(/_/g, '/')
   while (str.length % 4) {
     str += '='
@@ -492,28 +291,10 @@ async function handleProxy(request, corsHeaders, url) {
     
     console.log(`🌐 Proxy: ${targetUrl}`)
     
-    // Geographic optimization برای proxy
-    const clientCountry = request.cf?.country || 'IR'
-    const isFromIran = clientCountry === 'IR'
-    
-    const proxyHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5'
-    }
-    
-    // برای کاربران ایرانی، IP را mask کن
-    if (isFromIran) {
-      proxyHeaders['X-Forwarded-For'] = '185.25.182.1' // Dubai IP
-      proxyHeaders['CF-IPCountry'] = 'AE'
-    }
-    
     const proxyResponse = await fetch(targetUrl, {
-      headers: proxyHeaders,
-      cf: {
-        // Force routing through specific edges
-        cacheEverything: false,
-        cacheTtl: 0
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       }
     })
     
@@ -537,7 +318,7 @@ async function handleProxy(request, corsHeaders, url) {
         <div style="position: fixed; top: 0; left: 0; right: 0; z-index: 999999;
                     background: linear-gradient(45deg, #667eea, #764ba2); color: white;
                     padding: 8px 15px; text-align: center; font-family: Arial; font-size: 13px;">
-          🌍 Iran Geo Proxy | ${targetUrl} | Route: ${isFromIran ? 'External' : 'Direct'}
+          🇮🇷 Iran Proxy | ${targetUrl}
           <button onclick="this.parentElement.style.display='none'" 
                   style="float: right; background: rgba(255,255,255,0.2); border: 1px solid white; 
                          color: white; border-radius: 3px; cursor: pointer; padding: 2px 8px;">×</button>
@@ -556,8 +337,7 @@ async function handleProxy(request, corsHeaders, url) {
       headers: {
         ...corsHeaders,
         'Content-Type': contentType,
-        'X-Proxy-Status': 'Success',
-        'X-Geo-Route': isFromIran ? 'iran-external' : 'direct'
+        'X-Proxy-Status': 'Success'
       }
     })
     
@@ -605,7 +385,7 @@ function getMainPage(hostname) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🌍 Iran Smart Proxy - Geographic Enhanced</title>
+    <title>🇮🇷 Iran Smart Proxy - Browser Compatible!</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -655,8 +435,8 @@ function getMainPage(hostname) {
             background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 5px;
             font-family: 'Courier New', monospace;
         }
-        .geo-info {
-            background: rgba(255,193,7,0.1); border: 1px solid rgba(255,193,7,0.3);
+        .compatibility {
+            background: rgba(0,255,135,0.1); border: 1px solid rgba(0,255,135,0.3);
             padding: 20px; border-radius: 10px; margin: 20px 0;
         }
     </style>
@@ -664,54 +444,50 @@ function getMainPage(hostname) {
 <body>
     <div class="container">
         <div class="hero">
-            <h1>🌍 Iran Smart Proxy</h1>
-            <p>Geographic Enhanced - مسیریابی هوشمند جغرافیایی</p>
+            <h1>🛡️ Iran Smart Proxy</h1>
+            <p>نسخه سازگار با تمام مرورگرها و موبایل</p>
         </div>
         
         <div class="status">
-            ✅ <strong>Geographic Routing فعال!</strong><br>
-            اتصال خودکار از بهترین Edge Location ها
+            ✅ <strong>سازگار با Browser!</strong><br>
+            پشتیبانی کامل از Firefox, Chrome, Android
         </div>
         
         <div class="endpoint">
             🌐 DNS Endpoint: https://${hostname}/dns-query
         </div>
         
-        <div class="geo-info">
-            <h3>🗺️ مسیریابی جغرافیایی:</h3>
+        <div class="compatibility">
+            <h3>🔧 پشتیبانی شده:</h3>
             <ul style="list-style: none; padding: 0;">
-                <li>🇮🇷 سایت‌های ایرانی: مسیر داخلی (سریع‌ترین)</li>
-                <li>🚫 سایت‌های مسدود: مسیر خارجی (دور زدن محدودیت)</li>
-                <li>🎮 Gaming: نزدیک‌ترین Edge (کمترین ping)</li>
-                <li>🌐 بقیه: مسیر بهینه خودکار</li>
+                <li>✅ DNS JSON Format (API calls)</li>
+                <li>✅ DNS Wire Format (Browser DoH)</li>
+                <li>✅ GET & POST requests</li>
+                <li>✅ Base64 encoded queries</li>
+                <li>✅ CORS headers</li>
             </ul>
         </div>
         
         <div class="features">
             <div class="feature-card">
                 <h3>🧠 Smart DNS</h3>
-                <p>تشخیص خودکار و مسیریابی هوشمند</p>
+                <p>تشخیص خودکار سایت‌ها و مسیریابی هوشمند</p>
                 <p><strong>مسدود:</strong> ${BLOCKED_SITES.length} سایت</p>
             </div>
             <div class="feature-card">
-                <h3>🌍 Geographic Routing</h3>
-                <p>انتخاب بهترین Edge Location</p>
-                <p><strong>Edges:</strong> Tehran, Dubai, Istanbul</p>
-            </div>
-            <div class="feature-card">
                 <h3>🎮 Gaming Optimization</h3>
-                <p>کاهش ping با مسیریابی بهینه</p>
-                <p><strong>Games:</strong> Steam, Riot, Epic
+                <p>بهینه‌سازی ping برای بازی‌ها</p>
+                <p><strong>پلتفرم:</strong> ${GAMING_DOMAINS.length} دامنه</p>
             </div>
             <div class="feature-card">
                 <h3>🌐 HTTP Proxy</h3>
                 <p>دسترسی مستقیم به سایت‌های مسدود</p>
-                <p><strong>Geographic:</strong> Auto-route via best edge</p>
+                <p><strong>Web Interface:</strong> /browse</p>
             </div>
         </div>
         
         <div class="setup-section">
-            <h2>📱 تنظیمات مرورگرها</h2>
+            <h2>📱 تنظیمات مرورگرها (تضمینی!)</h2>
             
             <div class="setup-grid">
                 <div class="setup-item">
@@ -749,35 +525,15 @@ function getMainPage(hostname) {
         </div>
         
         <center>
-            <a href="/geo-status" class="btn">🗺️ Geographic Status</a>
-            <a href="/status" class="btn">📊 System Status</a>
+            <a href="/browse" class="btn">🌐 Web Browser</a>
+            <a href="/status" class="btn">📊 Status</a>
             <a href="/proxy?url=https://httpbin.org/json" class="btn">🧪 Test Proxy</a>
         </center>
         
         <div style="text-align: center; margin-top: 40px; opacity: 0.8;">
-            <p>🌍 Geographic Intelligence | ⚡ Edge Optimized | 🔒 Secure</p>
+            <p>🛡️ سازگار با همه مرورگرها | ⚡ سرعت بالا | 🔒 امن</p>
         </div>
     </div>
-    
-    <script>
-        // Auto-detect user location and show optimal settings
-        fetch('/geo-status')
-            .then(r => r.json())
-            .then(data => {
-                if (data.geographic_info) {
-                    const info = data.geographic_info;
-                    const isIran = info.is_iran;
-                    
-                    // Show optimal configuration based on location
-                    const statusEl = document.querySelector('.status');
-                    if (isIran) {
-                        statusEl.innerHTML += '<br><small>🇮🇷 تشخیص: ایران → مسیریابی بهینه فعال</small>';
-                    } else {
-                        statusEl.innerHTML += '<br><small>🌍 Location: ' + info.country + ' → Direct routing</small>';
-                    }
-                }
-            })
-            .catch(e => console.log('Geo detection failed:', e));
-    </script>
 </body>
 </html>`
+}
