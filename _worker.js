@@ -32,6 +32,16 @@ export default {
       return handleDoH(request, corsHeaders, url)
     }
     
+    // HTTP Proxy for actual traffic
+    if (url.pathname === '/proxy' || url.pathname.startsWith('/p/')) {
+      return handleHTTPProxy(request, corsHeaders, url)
+    }
+    
+    // Web Browser Interface
+    if (url.pathname === '/browse') {
+      return handleWebBrowser(url.hostname)
+    }
+    
     // Status endpoint
     if (url.pathname === '/status') {
       return new Response(JSON.stringify({
@@ -290,17 +300,382 @@ function base64UrlDecode(str) {
   }
 }
 
-function errorResponse(message, status, corsHeaders) {
-  return new Response(JSON.stringify({ 
-    error: message,
-    status: status,
-    timestamp: new Date().toISOString()
-  }), {
-    status: status,
-    headers: {
-      ...corsHeaders,
-      'Content-Type': 'application/json'
+async function handleHTTPProxy(request, corsHeaders, url) {
+  try {
+    let targetUrl
+    
+    if (url.pathname === '/proxy') {
+      targetUrl = url.searchParams.get('url')
+    } else if (url.pathname.startsWith('/p/')) {
+      // Extract URL from path: /p/https://example.com/path
+      targetUrl = url.pathname.substring(3) // Remove '/p/'
+      if (url.search) {
+        targetUrl += url.search
+      }
     }
+    
+    if (!targetUrl) {
+      return new Response(JSON.stringify({
+        error: 'پارامتر url ضروری است',
+        examples: [
+          '/proxy?url=https://chat.openai.com',
+          '/p/https://claude.ai',
+          '/browse برای رابط گرافیکی'
+        ]
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+    
+    // Validate URL
+    let urlObj
+    try {
+      urlObj = new URL(targetUrl)
+    } catch (e) {
+      return new Response(JSON.stringify({
+        error: 'URL نامعتبر',
+        provided: targetUrl
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+    
+    // Only allow HTTPS
+    if (urlObj.protocol !== 'https:') {
+      return new Response(JSON.stringify({
+        error: 'فقط HTTPS پشتیبانی می‌شود',
+        provided_protocol: urlObj.protocol
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+    
+    // Check if domain is in our blocked list (optional validation)
+    const hostname = urlObj.hostname.toLowerCase()
+    const isAllowedDomain = BLOCKED_DOMAINS.some(domain => 
+      hostname === domain || hostname.endsWith('.' + domain) || domain.includes(hostname)
+    )
+    
+    if (!isAllowedDomain) {
+      return new Response(JSON.stringify({
+        error: 'دامنه مجاز نیست',
+        hostname: hostname,
+        note: 'فقط سایت‌های لیست شده قابل دسترسی هستند'
+      }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+    
+    console.log(`🌐 HTTP Proxy: ${targetUrl}`)
+    
+    // Prepare headers for upstream request
+    const proxyHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': request.headers.get('Accept') || 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'DNT': '1',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none'
+    }
+    
+    // Copy some headers from original request
+    const allowedHeaders = ['Authorization', 'Content-Type', 'X-Requested-With', 'Cookie']
+    allowedHeaders.forEach(header => {
+      const value = request.headers.get(header)
+      if (value) {
+        proxyHeaders[header] = value
+      }
+    })
+    
+    // Make the proxied request
+    const startTime = Date.now()
+    const proxyResponse = await fetch(targetUrl, {
+      method: request.method,
+      headers: proxyHeaders,
+      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      cf: {
+        // Cloudflare-specific optimizations
+        cacheTtl: 300,
+        cacheEverything: false,
+        scrapeShield: false,
+        apps: false
+      }
+    })
+    
+    const proxyTime = Date.now() - startTime
+    console.log(`⏱️ Proxy response: ${proxyResponse.status} in ${proxyTime}ms`)
+    
+    if (!proxyResponse.ok && proxyResponse.status >= 400) {
+      return new Response(JSON.stringify({
+        error: 'خطا در دسترسی به سایت',
+        status: proxyResponse.status,
+        statusText: proxyResponse.statusText,
+        url: targetUrl
+      }), {
+        status: proxyResponse.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+    
+    // Handle different content types
+    const contentType = proxyResponse.headers.get('Content-Type') || ''
+    let responseBody
+    
+    if (contentType.includes('text/html')) {
+      // Modify HTML for proxy compatibility
+      let html = await proxyResponse.text()
+      html = modifyHtmlForProxy(html, targetUrl, url.hostname)
+      responseBody = html
+    } else if (contentType.includes('text/css')) {
+      // Modify CSS URLs
+      let css = await proxyResponse.text()
+      css = modifyCssForProxy(css, targetUrl, url.hostname)
+      responseBody = css
+    } else {
+      // Binary content or other formats
+      responseBody = proxyResponse.body
+    }
+    
+    // Prepare response headers
+    const responseHeaders = {
+      ...corsHeaders,
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=300',
+      'X-Proxy-Status': 'Success',
+      'X-Original-URL': targetUrl,
+      'X-Proxy-Time': `${proxyTime}ms`,
+      'X-Served-By': 'Iran-HTTP-Proxy'
+    }
+    
+    // Remove problematic headers
+    const removeHeaders = [
+      'Content-Security-Policy', 'X-Frame-Options', 'Strict-Transport-Security',
+      'Content-Security-Policy-Report-Only', 'X-Content-Type-Options'
+    ]
+    removeHeaders.forEach(header => {
+      if (proxyResponse.headers.has(header)) {
+        delete responseHeaders[header]
+      }
+    })
+    
+    return new Response(responseBody, {
+      status: proxyResponse.status,
+      statusText: proxyResponse.statusText,
+      headers: responseHeaders
+    })
+    
+  } catch (error) {
+    console.error('❌ HTTP Proxy Error:', error)
+    
+    return new Response(JSON.stringify({
+      error: 'خطا در HTTP Proxy',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    })
+  }
+}
+
+function modifyHtmlForProxy(html, originalUrl, proxyHost) {
+  try {
+    const urlObj = new URL(originalUrl)
+    const baseUrl = `${urlObj.protocol}//${urlObj.host}`
+    
+    // Fix relative URLs
+    html = html.replace(/href="\/([^"]*)"/g, `href="/p/${baseUrl}/$1"`)
+    html = html.replace(/src="\/([^"]*)"/g, `src="/p/${baseUrl}/$1"`)
+    html = html.replace(/action="\/([^"]*)"/g, `action="/p/${baseUrl}/$1"`)
+    
+    // Fix absolute URLs to other allowed domains
+    html = html.replace(/href="https:\/\/([^"]*?)"/g, (match, url) => {
+      const domain = url.split('/')[0]
+      const isAllowed = BLOCKED_DOMAINS.some(d => domain.includes(d) || d.includes(domain))
+      if (isAllowed) {
+        return `href="/p/https://${url}"`
+      }
+      return match
+    })
+    
+    // Add proxy banner
+    const banner = `
+      <div id="iran-proxy-banner" style="
+        position: fixed; top: 0; left: 0; right: 0; z-index: 999999;
+        background: linear-gradient(135deg, #667eea, #764ba2); color: white;
+        padding: 8px 15px; text-align: center; font-family: Arial, sans-serif;
+        font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      ">
+        🇮🇷 Iran HTTP Proxy Active | 🌐 ${originalUrl}
+        <button onclick="document.getElementById('iran-proxy-banner').style.display='none'" 
+                style="float: right; background: rgba(255,255,255,0.2); border: 1px solid white;
+                       color: white; border-radius: 3px; cursor: pointer; padding: 2px 8px; margin-left: 10px;">×</button>
+      </div>
+      <script>
+        // Add margin to body for banner
+        document.addEventListener('DOMContentLoaded', function() {
+          if (document.body) {
+            document.body.style.marginTop = '40px';
+          }
+        });
+      </script>
+    `
+    
+    // Insert banner after <body> tag
+    html = html.replace(/<body([^>]*)>/i, `<body$1>${banner}`)
+    
+    return html
+  } catch (e) {
+    console.error('HTML modification error:', e)
+    return html
+  }
+}
+
+function modifyCssForProxy(css, originalUrl, proxyHost) {
+  try {
+    const urlObj = new URL(originalUrl)
+    const baseUrl = `${urlObj.protocol}//${urlObj.host}`
+    
+    // Fix CSS URLs
+    css = css.replace(/url\(["']?\/([^"')]*?)["']?\)/g, `url("/p/${baseUrl}/$1")`)
+    
+    return css
+  } catch (e) {
+    console.error('CSS modification error:', e)
+    return css
+  }
+}
+
+function handleWebBrowser(hostname) {
+  return new Response(`
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌐 مرورگر وب Iran Proxy</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; direction: rtl; color: white;
+        }
+        .browser-container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .browser-header {
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(20px);
+            border-radius: 15px; padding: 20px; margin-bottom: 20px;
+        }
+        .address-bar { display: flex; gap: 10px; margin-bottom: 15px; }
+        .url-input {
+            flex: 1; padding: 12px; border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 8px; font-size: 16px; direction: ltr;
+            background: rgba(255,255,255,0.1); color: white;
+        }
+        .url-input::placeholder { color: rgba(255,255,255,0.7); }
+        .go-btn {
+            background: linear-gradient(45deg, #00ff87, #60efff); color: #0f0f23;
+            border: none; padding: 12px 25px; border-radius: 8px; 
+            cursor: pointer; font-size: 16px; font-weight: bold;
+        }
+        .shortcuts { display: flex; flex-wrap: wrap; gap: 10px; }
+        .shortcut-btn {
+            background: rgba(255,255,255,0.2); color: white;
+            padding: 8px 15px; text-decoration: none; border-radius: 20px;
+            font-size: 14px; cursor: pointer; border: none;
+        }
+        .iframe-container {
+            background: white; border-radius: 15px; overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3); height: 80vh;
+        }
+        #content-frame { width: 100%; height: 100%; border: none; }
+        .status-bar {
+            background: rgba(0,0,0,0.1); padding: 8px 15px; font-size: 12px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="browser-container">
+        <div class="browser-header">
+            <h2>🌐 مرورگر وب Iran Proxy</h2>
+            <p>دسترسی کامل به سایت‌های مسدود شده با HTTP Proxy</p>
+            
+            <div class="address-bar">
+                <input type="text" id="urlInput" class="url-input" 
+                       placeholder="chat.openai.com یا claude.ai وارد کنید..." 
+                       value="">
+                <button onclick="loadPage()" class="go-btn">🚀 برو</button>
+            </div>
+            
+            <div class="shortcuts">
+                <strong>میانبرهای AI و Cloud:</strong>
+                <button onclick="loadUrl('https://chat.openai.com')" class="shortcut-btn">🤖 ChatGPT</button>
+                <button onclick="loadUrl('https://claude.ai')" class="shortcut-btn">🧠 Claude</button>
+                <button onclick="loadUrl('https://cloud.google.com')" class="shortcut-btn">☁️ Google Cloud</button>
+                <button onclick="loadUrl('https://github.com')" class="shortcut-btn">💻 GitHub</button>
+                <button onclick="loadUrl('https://vmware.com')" class="shortcut-btn">🖥️ VMware</button>
+                <button onclick="loadUrl('https://intel.com')" class="shortcut-btn">🔧 Intel</button>
+            </div>
+        </div>
+        
+        <div class="iframe-container">
+            <div class="status-bar">
+                <span id="status">آماده برای مرورگری...</span>
+                <span id="proxy-status">🛡️ HTTP Proxy فعال</span>
+            </div>
+            <iframe id="content-frame" src="about:blank"></iframe>
+        </div>
+    </div>
+    
+    <script>
+        function loadPage() {
+            const url = document.getElementById('urlInput').value.trim();
+            if (url) {
+                loadUrl(url);
+            }
+        }
+        
+        function loadUrl(url) {
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                url = 'https://' + url;
+            }
+            
+            const proxyUrl = \`/p/\${url}\`;
+            const frame = document.getElementById('content-frame');
+            const status = document.getElementById('status');
+            
+            status.textContent = 'در حال بارگذاری...';
+            frame.src = proxyUrl;
+            document.getElementById('urlInput').value = url;
+            
+            frame.onload = function() {
+                status.textContent = \`✅ بارگذاری شد: \${url}\`;
+            };
+            
+            frame.onerror = function() {
+                status.textContent = '❌ خطا در بارگذاری';
+            };
+        }
+        
+        document.getElementById('urlInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadPage();
+            }
+        });
+    </script>
+</body>
+</html>
+  `, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
   })
 }
 
