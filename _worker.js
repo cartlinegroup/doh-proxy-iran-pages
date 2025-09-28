@@ -53,8 +53,56 @@ export default {
 }
 
 const BLOCKED_DOMAINS = [
+  // Social Media & Communication
   'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'youtube.com',
-  'telegram.org', 'discord.com', 'reddit.com', 'github.com'
+  'telegram.org', 'discord.com', 'reddit.com', 'slack.com',
+  
+  // AI & Development
+  'chat.openai.com', 'openai.com', 'claude.ai', 'chat.claude.ai',
+  'chatgpt.com', 'cdn.oaistatic.com', 'bard.google.com', 'gemini.google.com',
+  'github.com', 'gitlab.com', 'notion.so', 'pastebin.com',
+  
+  // Google Services
+  'analytics.google.com', 'firebaseremoteconfig.googleapis.com', 'cloud.google.com',
+  'ads.google.com', 'fonts.googleapis.com', 'developer.android.com',
+  'console.cloud.google.com', 'googletagmanager.com', 'firebase.google.com',
+  'packages.cloud.google.com', 'developers.google.com', 'dl.google.com',
+  'notifications.google.com', 'firebaseextensions.clients6.google.com',
+  'i.ytimg.com', 'appspot.com', 'web.dev',
+  
+  // Cloud & Enterprise
+  'cloud.oracle.com', 'oraclecloud.com', 'oracle.com',
+  'vmware.com', 'vsphereclient.vmware.com', 'code.vmware.com',
+  'blogs.vmware.com', 'kb.vmware.com', 'docs.vmware.com', 'ssc.vmware.com',
+  'my.vmware.com', 'mon.vmware.com',
+  
+  // Hardware & Tech Companies  
+  'intel.com', 'intel.de', 'downloadcenter.intel.com', 'corpredirect.intel.com',
+  'ark.intel.com', 'amd.com', 'nvidia.com', 'lenovo.com', 'pcsupport.lenovo.com',
+  'motorola.com', 'ti.com', 'adobe.com', 'att.com',
+  
+  // Development Tools
+  'docker.io', 'docker.com', 'repo.mysql.com', 'apt.kubernetes.io',
+  'golang.org', 'grafana.com', 'splunk.com',
+  
+  // Networks & Security
+  'hpe.com', 'community.hpe.com', 'solarwinds.com', 'thwack.solarwinds.com',
+  'oriondemo.solarwinds.com', 'spiceworks.com', 'gns3.com',
+  
+  // E-commerce & Services
+  'ebay.com', 'ebaystatic.com', 'ebayimg.com', 'ebaycdn.net',
+  'visa.com', 'visa.de', 'kinsta.com',
+  
+  // CDN & Infrastructure
+  'dgivdslhqe3qo.cloudfront.net', 'd36jcksde1wxzq.cloudfront.net',
+  'd2wy8f7a9ursnm.cloudfront.net', 'd20hvw4zeymqbm.cloudfront.net',
+  
+  // Cisco Systems
+  'download-ssc.cisco.com', 'api.cisco.com', 'software.cisco.com',
+  
+  // Other Services
+  'algolia.com', 'atlassian.net', 'arcgis.com', 'computerworld.com',
+  'filehippo.com', 'boardgamegeek.com', 'ign.com', 'linuxhostsupport.com'
 ]
 
 const CLOUDFLARE_IPS = [
