@@ -1,4 +1,4 @@
-// _worker.js - نسخه Fix شده و تست شده
+// _worker.js - Compatible with Browsers (DNS Wire Format + JSON)
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
@@ -22,7 +22,7 @@ export default {
       })
     }
     
-    // DNS Query Handler
+    // DNS Query Handler - پشتیبانی از هر دو فرمت
     if (url.pathname === '/dns-query' || url.pathname === '/resolve') {
       return handleDNS(request, corsHeaders, url)
     }
@@ -32,22 +32,14 @@ export default {
       return handleProxy(request, corsHeaders, url)
     }
     
-    // Simple Status
+    // Status
     if (url.pathname === '/status') {
       return jsonResponse({
         status: 'OK',
         timestamp: new Date().toISOString(),
-        service: 'Iran Smart Proxy',
-        version: '2.0-stable'
-      }, 200, corsHeaders)
-    }
-    
-    // Test endpoint
-    if (url.pathname === '/test') {
-      return jsonResponse({
-        message: 'سرویس کار می‌کند!',
-        test_results: ['DNS: OK', 'Proxy: OK', 'System: OK'],
-        timestamp: new Date().toISOString()
+        service: 'Iran Smart Proxy - Browser Compatible',
+        version: '2.1-browser-fix',
+        supports: ['DNS JSON', 'DNS Wire Format', 'HTTP Proxy']
       }, 200, corsHeaders)
     }
     
@@ -58,7 +50,10 @@ export default {
 // سایت‌های مسدود
 const BLOCKED_SITES = [
   'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'youtube.com',
-  'telegram.org', 'discord.com', 'reddit.com', 'github.com', 'medium.com' , 'adobe.com', 'google.com', 'cluade.ai', 'chatgpt.com', 'openai.com'
+  'telegram.org', 'discord.com', 'reddit.com', 'github.com', 'medium.com',
+  'bbc.com', 'cnn.com', 'wikipedia.org'
+ 'adobe.com', 'google.com', 'claude.ai', 'grok.com', 'openai.com',
+  'chatgpt.com', 'developer.android.com', 'intel.com'
 ]
 
 // سایت‌های ایرانی
@@ -79,30 +74,98 @@ const CF_IPS = [
 
 async function handleDNS(request, corsHeaders, url) {
   try {
-    const name = url.searchParams.get('name')
-    const type = url.searchParams.get('type') || 'A'
-    const gaming = url.searchParams.get('gaming') === 'true'
+    let dnsQuery = null
+    let name = null
+    let type = 'A'
     
+    // تشخیص نوع درخواست
+    if (request.method === 'GET') {
+      // GET request - JSON یا Wire format
+      name = url.searchParams.get('name')
+      type = url.searchParams.get('type') || 'A'
+      
+      // بررسی DNS wire format در URL (base64)
+      const dnsParam = url.searchParams.get('dns')
+      if (dnsParam) {
+        try {
+          dnsQuery = base64UrlDecode(dnsParam)
+        } catch (e) {
+          console.log('Invalid DNS base64:', e)
+        }
+      }
+    } else if (request.method === 'POST') {
+      // POST request - DNS wire format
+      const contentType = request.headers.get('Content-Type') || ''
+      if (contentType.includes('application/dns-message')) {
+        dnsQuery = new Uint8Array(await request.arrayBuffer())
+      }
+    }
+    
+    // اگر wire format داریم، forward کن
+    if (dnsQuery) {
+      return await forwardDNSWireFormat(dnsQuery, corsHeaders)
+    }
+    
+    // اگر name نداریم، خطا
     if (!name) {
       return jsonResponse({
         error: 'پارامتر name ضروری است',
-        example: '/dns-query?name=google.com'
+        examples: {
+          json: '/dns-query?name=google.com',
+          wire: '/dns-query?dns=BASE64_ENCODED_QUERY'
+        }
       }, 400, corsHeaders)
     }
     
     console.log(`🔍 DNS Query: ${name}`)
     
+    // تشخیص Accept header برای فرمت پاسخ
+    const acceptHeader = request.headers.get('Accept') || ''
+    const wantsWireFormat = acceptHeader.includes('application/dns-message')
+    const wantsJSON = acceptHeader.includes('application/dns-json') || 
+                     acceptHeader.includes('application/json') ||
+                     !wantsWireFormat // پیش‌فرض JSON
+    
     // تشخیص نوع سایت
     const siteType = getSiteType(name)
+    const gaming = url.searchParams.get('gaming') === 'true'
     
-    // DNS Query
-    const queryUrl = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`
+    // انتخاب بهترین DNS provider
+    let dnsProvider = 'https://cloudflare-dns.com/dns-query'
+    
+    // درخواست به DNS provider
+    const queryUrl = `${dnsProvider}?name=${encodeURIComponent(name)}&type=${type}`
     
     const startTime = Date.now()
-    const dnsResponse = await fetch(queryUrl, {
+    
+    // درخواست wire format یا JSON بسته به نیاز
+    let dnsResponse
+    if (wantsWireFormat) {
+      // درخواست wire format
+      dnsResponse = await fetch(queryUrl, {
+        headers: {
+          'Accept': 'application/dns-message',
+          'User-Agent': 'Iran-Proxy-Browser/1.0'
+        }
+      })
+      
+      if (dnsResponse.ok) {
+        const wireData = await dnsResponse.arrayBuffer()
+        return new Response(wireData, {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/dns-message',
+            'Cache-Control': 'public, max-age=300'
+          }
+        })
+      }
+    }
+    
+    // پیش‌فرض: JSON format
+    dnsResponse = await fetch(queryUrl, {
       headers: {
         'Accept': 'application/dns-json',
-        'User-Agent': 'Iran-Proxy/1.0'
+        'User-Agent': 'Iran-Proxy-JSON/1.0'
       }
     })
     
@@ -136,7 +199,8 @@ async function handleDNS(request, corsHeaders, url) {
       gaming_mode: gaming,
       proxy_applied: siteType === 'blocked',
       query_time_ms: queryTime,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      format: 'JSON'
     }
     
     return jsonResponse(data, 200, corsHeaders, {
@@ -152,6 +216,56 @@ async function handleDNS(request, corsHeaders, url) {
       message: error.message
     }, 500, corsHeaders)
   }
+}
+
+async function forwardDNSWireFormat(dnsQuery, corsHeaders) {
+  try {
+    console.log('🔄 Forwarding DNS wire format query')
+    
+    // Forward به Cloudflare DoH
+    const response = await fetch('https://cloudflare-dns.com/dns-query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/dns-message',
+        'Accept': 'application/dns-message',
+        'User-Agent': 'Iran-Proxy-Wire/1.0'
+      },
+      body: dnsQuery
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Wire format forward failed: ${response.status}`)
+    }
+    
+    const responseData = await response.arrayBuffer()
+    
+    return new Response(responseData, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/dns-message',
+        'Cache-Control': 'public, max-age=300',
+        'X-Proxy-Format': 'Wire'
+      }
+    })
+  } catch (error) {
+    console.error('Wire format error:', error)
+    throw error
+  }
+}
+
+function base64UrlDecode(str) {
+  // Base64 URL safe decoding
+  str = str.replace(/-/g, '+').replace(/_/g, '/')
+  while (str.length % 4) {
+    str += '='
+  }
+  
+  const binary = atob(str)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
 }
 
 async function handleProxy(request, corsHeaders, url) {
@@ -171,7 +285,6 @@ async function handleProxy(request, corsHeaders, url) {
       }, 400, corsHeaders)
     }
     
-    // Validation
     if (!targetUrl.startsWith('https://')) {
       return jsonResponse({
         error: 'فقط HTTPS پشتیبانی می‌شود'
@@ -180,7 +293,6 @@ async function handleProxy(request, corsHeaders, url) {
     
     console.log(`🌐 Proxy: ${targetUrl}`)
     
-    // Fetch target
     const proxyResponse = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -198,25 +310,25 @@ async function handleProxy(request, corsHeaders, url) {
     if (contentType.includes('text/html')) {
       let html = await proxyResponse.text()
       
-      // Simple URL fixing
       const urlObj = new URL(targetUrl)
       const baseUrl = `${urlObj.protocol}//${urlObj.host}`
       
       html = html.replace(/href="\/([^"]*)"/g, `href="/p/${baseUrl}/$1"`)
       html = html.replace(/src="\/([^"]*)"/g, `src="/p/${baseUrl}/$1"`)
       
-      // Add banner
       const banner = `
         <div style="position: fixed; top: 0; left: 0; right: 0; z-index: 999999;
-                    background: #667eea; color: white; padding: 8px; text-align: center;">
+                    background: linear-gradient(45deg, #667eea, #764ba2); color: white;
+                    padding: 8px 15px; text-align: center; font-family: Arial; font-size: 13px;">
           🇮🇷 Iran Proxy | ${targetUrl}
           <button onclick="this.parentElement.style.display='none'" 
-                  style="float: right; background: none; border: 1px solid white; color: white;">×</button>
+                  style="float: right; background: rgba(255,255,255,0.2); border: 1px solid white; 
+                         color: white; border-radius: 3px; cursor: pointer; padding: 2px 8px;">×</button>
         </div>
-        <div style="height: 40px;"></div>
+        <script>if (document.body) document.body.style.marginTop = '35px';</script>
       `
       
-      html = html.replace('<body', banner + '<body')
+      html = html.replace(/<body([^>]*)>/i, `<body$1>${banner}`)
       body = html
     } else {
       body = proxyResponse.body
@@ -275,40 +387,59 @@ function getMainPage(hostname) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🇮🇷 Iran Smart Proxy - Working!</title>
+    <title>🇮🇷 Iran Smart Proxy - Browser Compatible!</title>
     <style>
         body {
-            font-family: Tahoma, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh; color: white; direction: rtl;
             margin: 0; padding: 20px;
         }
-        .container { max-width: 800px; margin: 0 auto; text-align: center; }
-        .hero { padding: 60px 0; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .hero { text-align: center; padding: 40px 0; }
         .hero h1 { font-size: 3rem; margin-bottom: 20px; }
         .status {
             background: rgba(76, 175, 80, 0.2); border: 2px solid #4CAF50;
             padding: 20px; border-radius: 15px; margin: 30px 0;
-            font-size: 1.2rem;
+            text-align: center; font-size: 1.2rem;
         }
         .endpoint {
-            background: #4CAF50; color: white; padding: 20px;
-            border-radius: 15px; margin: 20px 0; font-family: monospace;
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white; padding: 20px; border-radius: 15px; margin: 20px 0;
+            font-family: 'Courier New', monospace; text-align: center;
         }
-        .test-section {
-            background: rgba(255,255,255,0.1); padding: 30px;
-            border-radius: 15px; margin: 30px 0;
+        .features {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px; margin: 40px 0;
+        }
+        .feature-card {
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(20px);
+            border-radius: 15px; padding: 25px; border: 1px solid rgba(255,255,255,0.2);
+        }
+        .setup-section {
+            background: rgba(255,255,255,0.05); border-radius: 15px;
+            padding: 25px; margin: 30px 0;
+        }
+        .setup-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px; margin-top: 20px;
+        }
+        .setup-item {
+            background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px;
         }
         .btn {
             background: rgba(255,255,255,0.2); color: white;
-            padding: 15px 25px; text-decoration: none; border-radius: 25px;
-            margin: 10px; display: inline-block; transition: all 0.3s;
+            padding: 12px 20px; text-decoration: none; border-radius: 20px;
+            margin: 8px; display: inline-block; transition: all 0.3s;
         }
         .btn:hover { background: rgba(255,255,255,0.3); }
-        #results {
-            background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px;
-            margin-top: 20px; font-family: monospace; text-align: left;
-            direction: ltr; white-space: pre-wrap;
+        code {
+            background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 5px;
+            font-family: 'Courier New', monospace;
+        }
+        .compatibility {
+            background: rgba(0,255,135,0.1); border: 1px solid rgba(0,255,135,0.3);
+            padding: 20px; border-radius: 10px; margin: 20px 0;
         }
     </style>
 </head>
@@ -316,94 +447,95 @@ function getMainPage(hostname) {
     <div class="container">
         <div class="hero">
             <h1>🛡️ Iran Smart Proxy</h1>
-            <p>سیستم هوشمند دور زدن محدودیت‌ها</p>
+            <p>نسخه سازگار با تمام مرورگرها و موبایل</p>
         </div>
         
         <div class="status">
-            <strong>✅ سیستم آنلاین و آماده!</strong><br>
-            تمام سرویس‌ها در حال کار هستند
+            ✅ <strong>سازگار با Browser!</strong><br>
+            پشتیبانی کامل از Firefox, Chrome, Android
         </div>
         
         <div class="endpoint">
             🌐 DNS Endpoint: https://${hostname}/dns-query
         </div>
         
-        <div class="test-section">
-            <h2>🧪 تست سریع سیستم</h2>
-            <button onclick="testDNS()" class="btn">📊 تست DNS</button>
-            <button onclick="testProxy()" class="btn">🌐 تست Proxy</button>
-            <button onclick="testStatus()" class="btn">📈 تست Status</button>
-            <button onclick="testAll()" class="btn">🚀 تست همه</button>
-            
-            <div id="results"></div>
+        <div class="compatibility">
+            <h3>🔧 پشتیبانی شده:</h3>
+            <ul style="list-style: none; padding: 0;">
+                <li>✅ DNS JSON Format (API calls)</li>
+                <li>✅ DNS Wire Format (Browser DoH)</li>
+                <li>✅ GET & POST requests</li>
+                <li>✅ Base64 encoded queries</li>
+                <li>✅ CORS headers</li>
+            </ul>
         </div>
         
-        <div style="margin-top: 40px;">
-            <h3>📱 تنظیمات سریع</h3>
-            <p><strong>Android Intra:</strong> Custom DoH → <code>https://${hostname}/dns-query</code></p>
-            <p><strong>Firefox:</strong> about:preferences#privacy → DNS over HTTPS → Custom</p>
-            <p><strong>Chrome:</strong> Settings → Security → Use secure DNS → Custom</p>
+        <div class="features">
+            <div class="feature-card">
+                <h3>🧠 Smart DNS</h3>
+                <p>تشخیص خودکار سایت‌ها و مسیریابی هوشمند</p>
+                <p><strong>مسدود:</strong> ${BLOCKED_SITES.length} سایت</p>
+            </div>
+            <div class="feature-card">
+                <h3>🎮 Gaming Optimization</h3>
+                <p>بهینه‌سازی ping برای بازی‌ها</p>
+                <p><strong>پلتفرم:</strong> ${GAMING_DOMAINS.length} دامنه</p>
+            </div>
+            <div class="feature-card">
+                <h3>🌐 HTTP Proxy</h3>
+                <p>دسترسی مستقیم به سایت‌های مسدود</p>
+                <p><strong>Web Interface:</strong> /browse</p>
+            </div>
+        </div>
+        
+        <div class="setup-section">
+            <h2>📱 تنظیمات مرورگرها (تضمینی!)</h2>
+            
+            <div class="setup-grid">
+                <div class="setup-item">
+                    <h4>🦊 Firefox</h4>
+                    <p>1. <code>about:preferences#privacy</code></p>
+                    <p>2. DNS over HTTPS → Custom</p>
+                    <p>3. <code>https://${hostname}/dns-query</code></p>
+                    <p>4. Restart Firefox</p>
+                </div>
+                
+                <div class="setup-item">
+                    <h4>🔵 Chrome/Edge</h4>
+                    <p>1. <code>chrome://settings/security</code></p>
+                    <p>2. Use secure DNS → Custom</p>
+                    <p>3. <code>https://${hostname}/dns-query</code></p>
+                    <p>4. Restart Browser</p>
+                </div>
+                
+                <div class="setup-item">
+                    <h4>📱 Android Intra</h4>
+                    <p>1. Install Intra from Play Store</p>
+                    <p>2. Custom DoH server</p>
+                    <p>3. <code>https://${hostname}/dns-query</code></p>
+                    <p>4. Test & Turn on</p>
+                </div>
+                
+                <div class="setup-item">
+                    <h4>🔧 Android 1.1.1.1</h4>
+                    <p>1. Install 1.1.1.1 app</p>
+                    <p>2. Advanced → Custom DoH</p>
+                    <p>3. <code>https://${hostname}/dns-query</code></p>
+                    <p>4. Connect</p>
+                </div>
+            </div>
+        </div>
+        
+        <center>
+            <a href="/browse" class="btn">🌐 Web Browser</a>
+            <a href="/status" class="btn">📊 Status</a>
+            <a href="/proxy?url=https://httpbin.org/json" class="btn">🧪 Test Proxy</a>
+        </center>
+        
+        <div style="text-align: center; margin-top: 40px; opacity: 0.8;">
+            <p>🛡️ سازگار با همه مرورگرها | ⚡ سرعت بالا | 🔒 امن</p>
         </div>
     </div>
-    
-    <script>
-        const results = document.getElementById('results');
-        
-        async function testDNS() {
-            results.textContent = '🔍 Testing DNS...\\n';
-            try {
-                const response = await fetch('/dns-query?name=google.com&type=A');
-                const data = await response.json();
-                results.textContent += '✅ DNS Test Success!\\n';
-                results.textContent += JSON.stringify(data, null, 2);
-            } catch (error) {
-                results.textContent += '❌ DNS Test Failed: ' + error.message;
-            }
-        }
-        
-        async function testProxy() {
-            results.textContent = '🌐 Testing Proxy...\\n';
-            try {
-                const response = await fetch('/proxy?url=https://httpbin.org/json');
-                results.textContent += '✅ Proxy Test Success!\\n';
-                results.textContent += 'Status: ' + response.status + '\\n';
-                results.textContent += 'Headers: ' + JSON.stringify([...response.headers.entries()], null, 2);
-            } catch (error) {
-                results.textContent += '❌ Proxy Test Failed: ' + error.message;
-            }
-        }
-        
-        async function testStatus() {
-            results.textContent = '📈 Testing Status...\\n';
-            try {
-                const response = await fetch('/status');
-                const data = await response.json();
-                results.textContent += '✅ Status Test Success!\\n';
-                results.textContent += JSON.stringify(data, null, 2);
-            } catch (error) {
-                results.textContent += '❌ Status Test Failed: ' + error.message;
-            }
-        }
-        
-        async function testAll() {
-            results.textContent = '🚀 Running all tests...\\n\\n';
-            
-            await testDNS();
-            results.textContent += '\\n' + '='.repeat(50) + '\\n\\n';
-            
-            await testProxy();
-            results.textContent += '\\n' + '='.repeat(50) + '\\n\\n';
-            
-            await testStatus();
-            
-            results.textContent += '\\n\\n🎉 All tests completed!';
-        }
-        
-        // Auto test on load
-        setTimeout(() => {
-            testStatus();
-        }, 1000);
-    </script>
 </body>
 </html>`
 }
