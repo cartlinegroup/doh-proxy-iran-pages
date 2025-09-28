@@ -1,4 +1,4 @@
-// _worker.js - Fully Compatible DoH Worker
+// _worker.js - Complete DoH + HTTP Proxy with Anti-Detection
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
@@ -47,9 +47,11 @@ export default {
       return new Response(JSON.stringify({
         status: 'operational',
         timestamp: new Date().toISOString(),
-        service: 'DoH Iran Proxy',
-        protocols: ['DoH GET', 'DoH POST', 'JSON', 'Wire Format'],
-        compatible_with: ['Firefox', 'Chrome', 'Android Intra', '1.1.1.1 app']
+        service: 'DoH + HTTP Proxy Iran',
+        protocols: ['DoH GET', 'DoH POST', 'HTTP Proxy', 'JSON', 'Wire Format'],
+        compatible_with: ['Firefox', 'Chrome', 'Android Intra', '1.1.1.1 app'],
+        blocked_domains: BLOCKED_DOMAINS.length,
+        features: ['Smart DNS', 'HTTP Proxy', 'Anti-Detection']
       }), {
         headers: {
           ...corsHeaders,
@@ -246,60 +248,6 @@ async function handleDoH(request, corsHeaders, url) {
   }
 }
 
-async function forwardWireQuery(wireQuery, corsHeaders, returnWireFormat) {
-  try {
-    console.log('🔄 Forwarding wire format query to upstream')
-    
-    const response = await fetch('https://cloudflare-dns.com/dns-query', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/dns-message',
-        'Accept': 'application/dns-message',
-        'User-Agent': 'DoH-Iran-Wire/1.0'
-      },
-      body: wireQuery
-    })
-    
-    if (!response.ok) {
-      throw new Error(`Wire query failed: ${response.status}`)
-    }
-    
-    const responseData = await response.arrayBuffer()
-    
-    return new Response(responseData, {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/dns-message',
-        'Cache-Control': 'public, max-age=300'
-      }
-    })
-    
-  } catch (error) {
-    console.error('Wire forward error:', error)
-    throw error
-  }
-}
-
-function base64UrlDecode(str) {
-  // Convert base64url to base64
-  str = str.replace(/-/g, '+').replace(/_/g, '/')
-  // Add padding if needed
-  while (str.length % 4) {
-    str += '='
-  }
-  
-  try {
-    const binary = atob(str)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes
-  } catch (e) {
-    throw new Error('Invalid base64 encoding')
-  }
-}
-
 async function handleHTTPProxy(request, corsHeaders, url) {
   try {
     let targetUrl
@@ -363,7 +311,8 @@ async function handleHTTPProxy(request, corsHeaders, url) {
       return new Response(JSON.stringify({
         error: 'دامنه مجاز نیست',
         hostname: hostname,
-        note: 'فقط سایت‌های لیست شده قابل دسترسی هستند'
+        note: 'فقط سایت‌های لیست شده قابل دسترسی هستند',
+        hint: 'برای اضافه کردن دامنه جدید با مدیر تماس بگیرید'
       }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -372,7 +321,7 @@ async function handleHTTPProxy(request, corsHeaders, url) {
     
     console.log(`🌐 HTTP Proxy: ${targetUrl}`)
     
-    // Prepare headers for upstream request
+    // Prepare headers for upstream request with anti-detection
     const proxyHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': request.headers.get('Accept') || 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -383,42 +332,149 @@ async function handleHTTPProxy(request, corsHeaders, url) {
       'Upgrade-Insecure-Requests': '1',
       'Sec-Fetch-Dest': 'document',
       'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none'
+      'Sec-Fetch-Site': 'cross-site',
+      'Sec-Ch-Ua': '"Google Chrome";v="120", "Chromium";v="120", "Not=A?Brand";v="99"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      // Add more realistic browser headers
+      'Referer': 'https://www.google.com/',
+      'Origin': urlObj.origin
     }
     
     // Copy some headers from original request
-    const allowedHeaders = ['Authorization', 'Content-Type', 'X-Requested-With', 'Cookie']
+    const allowedHeaders = ['Authorization', 'Content-Type', 'X-Requested-With']
     allowedHeaders.forEach(header => {
       const value = request.headers.get(header)
-      if (value) {
+      if (value && !proxyHeaders[header]) {
         proxyHeaders[header] = value
       }
     })
     
-    // Make the proxied request
+    // Make multiple attempts with different strategies
+    let proxyResponse
+    let attempts = 0
+    const maxAttempts = 3
     const startTime = Date.now()
-    const proxyResponse = await fetch(targetUrl, {
-      method: request.method,
-      headers: proxyHeaders,
-      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
-      cf: {
-        // Cloudflare-specific optimizations
-        cacheTtl: 300,
-        cacheEverything: false,
-        scrapeShield: false,
-        apps: false
+    
+    while (attempts < maxAttempts) {
+      attempts++
+      
+      try {
+        console.log(`🔄 Attempt ${attempts} for ${targetUrl}`)
+        
+        // Strategy 1: Direct request with browser headers
+        if (attempts === 1) {
+          proxyResponse = await fetch(targetUrl, {
+            method: request.method,
+            headers: proxyHeaders,
+            body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+            cf: {
+              cacheTtl: 60,
+              cacheEverything: false,
+              scrapeShield: false,
+              apps: false,
+              // Try different Cloudflare settings
+              polish: 'off',
+              minify: {
+                javascript: false,
+                css: false,
+                html: false
+              }
+            }
+          })
+        }
+        // Strategy 2: With different User-Agent
+        else if (attempts === 2) {
+          proxyHeaders['User-Agent'] = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          delete proxyHeaders['Sec-Ch-Ua']
+          delete proxyHeaders['Sec-Ch-Ua-Mobile']
+          delete proxyHeaders['Sec-Ch-Ua-Platform']
+          
+          proxyResponse = await fetch(targetUrl, {
+            method: request.method,
+            headers: proxyHeaders,
+            body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined
+          })
+        }
+        // Strategy 3: Minimal headers
+        else {
+          const minimalHeaders = {
+            'User-Agent': 'curl/7.68.0',
+            'Accept': '*/*',
+            'Connection': 'keep-alive'
+          }
+          
+          proxyResponse = await fetch(targetUrl, {
+            method: 'GET',
+            headers: minimalHeaders
+          })
+        }
+        
+        // If we get a successful response, break
+        if (proxyResponse.ok || proxyResponse.status < 400) {
+          break
+        }
+        
+        console.log(`❌ Attempt ${attempts} failed: ${proxyResponse.status}`)
+        
+        // Don't retry on certain errors
+        if (proxyResponse.status === 404 || proxyResponse.status === 410) {
+          break
+        }
+        
+      } catch (error) {
+        console.error(`❌ Attempt ${attempts} error:`, error.message)
+        if (attempts === maxAttempts) {
+          throw error
+        }
+        // Wait a bit before retry
+        await new Promise(resolve => setTimeout(resolve, 1000))
       }
-    })
+    }
     
     const proxyTime = Date.now() - startTime
-    console.log(`⏱️ Proxy response: ${proxyResponse.status} in ${proxyTime}ms`)
+    console.log(`⏱️ Proxy response: ${proxyResponse.status} in ${proxyTime}ms after ${attempts} attempts`)
+    
+    // Handle different types of responses
+    if (proxyResponse.status === 403) {
+      // Try to provide helpful error message
+      return new Response(JSON.stringify({
+        error: 'دسترسی ممنوع (403)',
+        message: 'سایت درخواست‌های automated را مسدود کرده است',
+        suggestions: [
+          'از Web Browser (/browse) استفاده کنید',
+          'ممکن است نیاز به VPN اضافی داشته باشید',
+          'برخی سایت‌ها Cloudflare Workers را detect می‌کنند'
+        ],
+        url: targetUrl,
+        attempted_strategies: attempts
+      }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
     
     if (!proxyResponse.ok && proxyResponse.status >= 400) {
+      // Try to get error details
+      let errorDetails = 'خطا در دسترسی'
+      try {
+        const errorText = await proxyResponse.text()
+        if (errorText.length < 500) {
+          errorDetails = errorText
+        }
+      } catch (e) {
+        // Ignore error reading response
+      }
+      
       return new Response(JSON.stringify({
         error: 'خطا در دسترسی به سایت',
         status: proxyResponse.status,
         statusText: proxyResponse.statusText,
-        url: targetUrl
+        details: errorDetails,
+        url: targetUrl,
+        suggestion: 'ممکن است سایت موقتاً در دسترس نباشد یا درخواست را رد کرده باشد'
       }), {
         status: proxyResponse.status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -452,7 +508,8 @@ async function handleHTTPProxy(request, corsHeaders, url) {
       'X-Proxy-Status': 'Success',
       'X-Original-URL': targetUrl,
       'X-Proxy-Time': `${proxyTime}ms`,
-      'X-Served-By': 'Iran-HTTP-Proxy'
+      'X-Served-By': 'Iran-HTTP-Proxy',
+      'X-Attempts': attempts.toString()
     }
     
     // Remove problematic headers
@@ -483,6 +540,60 @@ async function handleHTTPProxy(request, corsHeaders, url) {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
+  }
+}
+
+async function forwardWireQuery(wireQuery, corsHeaders, returnWireFormat) {
+  try {
+    console.log('🔄 Forwarding wire format query to upstream')
+    
+    const response = await fetch('https://cloudflare-dns.com/dns-query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/dns-message',
+        'Accept': 'application/dns-message',
+        'User-Agent': 'DoH-Iran-Wire/1.0'
+      },
+      body: wireQuery
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Wire query failed: ${response.status}`)
+    }
+    
+    const responseData = await response.arrayBuffer()
+    
+    return new Response(responseData, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/dns-message',
+        'Cache-Control': 'public, max-age=300'
+      }
+    })
+    
+  } catch (error) {
+    console.error('Wire forward error:', error)
+    throw error
+  }
+}
+
+function base64UrlDecode(str) {
+  // Convert base64url to base64
+  str = str.replace(/-/g, '+').replace(/_/g, '/')
+  // Add padding if needed
+  while (str.length % 4) {
+    str += '='
+  }
+  
+  try {
+    const binary = atob(str)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    return bytes
+  } catch (e) {
+    throw new Error('Invalid base64 encoding')
   }
 }
 
@@ -610,267 +721,4 @@ function handleWebBrowser(hostname) {
             <p>دسترسی کامل به سایت‌های مسدود شده با HTTP Proxy</p>
             
             <div class="address-bar">
-                <input type="text" id="urlInput" class="url-input" 
-                       placeholder="chat.openai.com یا claude.ai وارد کنید..." 
-                       value="">
-                <button onclick="loadPage()" class="go-btn">🚀 برو</button>
-            </div>
-            
-            <div class="shortcuts">
-                <strong>میانبرهای AI و Cloud:</strong>
-                <button onclick="loadUrl('https://chat.openai.com')" class="shortcut-btn">🤖 ChatGPT</button>
-                <button onclick="loadUrl('https://claude.ai')" class="shortcut-btn">🧠 Claude</button>
-                <button onclick="loadUrl('https://cloud.google.com')" class="shortcut-btn">☁️ Google Cloud</button>
-                <button onclick="loadUrl('https://github.com')" class="shortcut-btn">💻 GitHub</button>
-                <button onclick="loadUrl('https://vmware.com')" class="shortcut-btn">🖥️ VMware</button>
-                <button onclick="loadUrl('https://intel.com')" class="shortcut-btn">🔧 Intel</button>
-            </div>
-        </div>
-        
-        <div class="iframe-container">
-            <div class="status-bar">
-                <span id="status">آماده برای مرورگری...</span>
-                <span id="proxy-status">🛡️ HTTP Proxy فعال</span>
-            </div>
-            <iframe id="content-frame" src="about:blank"></iframe>
-        </div>
-    </div>
-    
-    <script>
-        function loadPage() {
-            const url = document.getElementById('urlInput').value.trim();
-            if (url) {
-                loadUrl(url);
-            }
-        }
-        
-        function loadUrl(url) {
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                url = 'https://' + url;
-            }
-            
-            const proxyUrl = \`/p/\${url}\`;
-            const frame = document.getElementById('content-frame');
-            const status = document.getElementById('status');
-            
-            status.textContent = 'در حال بارگذاری...';
-            frame.src = proxyUrl;
-            document.getElementById('urlInput').value = url;
-            
-            frame.onload = function() {
-                status.textContent = \`✅ بارگذاری شد: \${url}\`;
-            };
-            
-            frame.onerror = function() {
-                status.textContent = '❌ خطا در بارگذاری';
-            };
-        }
-        
-        document.getElementById('urlInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                loadPage();
-            }
-        });
-    </script>
-</body>
-</html>
-  `, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' }
-  })
-}
-
-function getHomePage(hostname) {
-  return `<!DOCTYPE html>
-<html dir="rtl" lang="fa">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🇮🇷 DoH Iran Proxy - Compatible</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-            min-height: 100vh; color: white; direction: rtl; margin: 0; padding: 20px;
-        }
-        .container { max-width: 800px; margin: 0 auto; }
-        .header { text-align: center; padding: 40px 0; }
-        .header h1 { font-size: 3rem; margin-bottom: 20px; }
-        .status {
-            background: rgba(34, 197, 94, 0.2); border: 2px solid #22c55e;
-            padding: 20px; border-radius: 15px; margin: 30px 0; text-align: center;
-        }
-        .endpoint {
-            background: rgba(255,255,255,0.1); backdrop-filter: blur(10px);
-            padding: 20px; border-radius: 15px; margin: 20px 0;
-            font-family: 'Courier New', monospace; text-align: center;
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        .setup {
-            background: rgba(255,255,255,0.05); padding: 25px; border-radius: 15px;
-            margin: 30px 0;
-        }
-        .setup-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px; margin-top: 20px;
-        }
-        .setup-card {
-            background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;
-        }
-        .btn {
-            background: rgba(255,255,255,0.2); color: white; padding: 12px 20px;
-            text-decoration: none; border-radius: 20px; margin: 8px;
-            display: inline-block; transition: all 0.3s;
-        }
-        .btn:hover { background: rgba(255,255,255,0.3); }
-        .test-section {
-            background: rgba(255,255,255,0.05); padding: 20px; border-radius: 15px;
-            margin: 30px 0; text-align: center;
-        }
-        #test-result {
-            background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px;
-            margin-top: 15px; font-family: monospace; text-align: left; direction: ltr;
-            white-space: pre-wrap; min-height: 100px; overflow-x: auto;
-        }
-        code {
-            background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px;
-            font-family: 'Courier New', monospace;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🛡️ DoH Iran Proxy</h1>
-            <p>DNS over HTTPS - مطابق با استانداردهای RFC</p>
-        </div>
-        
-        <div class="status">
-            ✅ <strong>سرویس آنلاین</strong><br>
-            سازگار با Firefox, Chrome, Android Intra
-        </div>
-        
-        <div class="endpoint">
-            <div style="font-size: 1.2em; margin-bottom: 10px;">🌐 DoH Endpoint:</div>
-            <div style="font-size: 1.1em; color: #a7f3d0;">https://${hostname}/dns-query</div>
-        </div>
-        
-        <div class="test-section">
-            <h2>🧪 تست سریع</h2>
-            <button onclick="testDoH()" class="btn">📊 تست DNS</button>
-            <button onclick="testWireFormat()" class="btn">🔧 تست Wire Format</button>
-            <button onclick="clearResults()" class="btn">🗑️ پاک کردن</button>
-            <div id="test-result">کلیک روی دکمه تست برای شروع...</div>
-        </div>
-        
-        <div class="setup">
-            <h2 style="text-align: center; margin-bottom: 20px;">📱 راهنمای تنظیم</h2>
-            
-            <div class="setup-grid">
-                <div class="setup-card">
-                    <h3>🦊 Firefox</h3>
-                    <ol>
-                        <li><code>about:preferences#privacy</code></li>
-                        <li>DNS over HTTPS</li>
-                        <li>Custom provider</li>
-                        <li><code>https://${hostname}/dns-query</code></li>
-                        <li>Restart Firefox</li>
-                    </ol>
-                </div>
-                
-                <div class="setup-card">
-                    <h3>🔵 Chrome</h3>
-                    <ol>
-                        <li><code>chrome://settings/security</code></li>
-                        <li>Use secure DNS</li>
-                        <li>With Custom provider</li>
-                        <li><code>https://${hostname}/dns-query</code></li>
-                        <li>Restart Chrome</li>
-                    </ol>
-                </div>
-                
-                <div class="setup-card">
-                    <h3>📱 Android Intra</h3>
-                    <ol>
-                        <li>Install Intra from Play Store</li>
-                        <li>Settings → Choose DNS server</li>
-                        <li>Custom server URL</li>
-                        <li><code>https://${hostname}/dns-query</code></li>
-                        <li>Test server → Enable</li>
-                    </ol>
-                </div>
-                
-                <div class="setup-card">
-                    <h3>🌐 1.1.1.1 App</h3>
-                    <ol>
-                        <li>Install 1.1.1.1 app</li>
-                        <li>Advanced → Connection options</li>
-                        <li>DNS over HTTPS</li>
-                        <li><code>https://${hostname}/dns-query</code></li>
-                        <li>Save and Connect</li>
-                    </ol>
-                </div>
-            </div>
-        </div>
-        
-        <div style="text-align: center; margin-top: 40px; opacity: 0.8;">
-            <p>🔒 رمزگذاری کامل | 🚀 سرعت بالا | 🛡️ حریم خصوصی محفوظ</p>
-        </div>
-    </div>
-    
-    <script>
-        const resultDiv = document.getElementById('test-result');
-        
-        async function testDoH() {
-            resultDiv.textContent = '🔍 Testing DoH JSON format...\\n';
-            
-            try {
-                const response = await fetch('/dns-query?name=google.com&type=A');
-                const data = await response.json();
-                
-                resultDiv.textContent += '✅ JSON Test Success!\\n';
-                resultDiv.textContent += \`Response: \${response.status}\\n\`;
-                resultDiv.textContent += \`Query time: \${data._iran_proxy?.query_time_ms}ms\\n\`;
-                resultDiv.textContent += \`Blocked site: \${data._iran_proxy?.blocked_site}\\n\`;
-                resultDiv.textContent += \`IP: \${data.Answer?.[0]?.data}\\n\\n\`;
-                resultDiv.textContent += JSON.stringify(data, null, 2);
-                
-            } catch (error) {
-                resultDiv.textContent += \`❌ Test Failed: \${error.message}\\n\`;
-            }
-        }
-        
-        async function testWireFormat() {
-            resultDiv.textContent = '🔧 Testing DoH Wire format...\\n';
-            
-            try {
-                const response = await fetch('/dns-query?name=cloudflare.com&type=A', {
-                    headers: {
-                        'Accept': 'application/dns-message'
-                    }
-                });
-                
-                resultDiv.textContent += \`✅ Wire Format Test: \${response.status}\\n\`;
-                resultDiv.textContent += \`Content-Type: \${response.headers.get('Content-Type')}\\n\`;
-                resultDiv.textContent += \`Content-Length: \${response.headers.get('Content-Length')} bytes\\n\`;
-                
-                if (response.ok) {
-                    resultDiv.textContent += '✅ Wire format working correctly!\\n';
-                } else {
-                    resultDiv.textContent += '❌ Wire format failed\\n';
-                }
-                
-            } catch (error) {
-                resultDiv.textContent += \`❌ Wire Test Failed: \${error.message}\\n\`;
-            }
-        }
-        
-        function clearResults() {
-            resultDiv.textContent = 'Results cleared. Click test button to start...';
-        }
-        
-        // Auto test on load
-        setTimeout(testDoH, 1000);
-    </script>
-</body>
-</html>`
-}
+                <input type
