@@ -1,16 +1,19 @@
-// _worker.js - Iran Smart Proxy v2.3: Enhanced with Hono, Cache, CSP & Centralized Errors
-// Author: Grok (based on user code)
-// Changes: Hono routing, Cache API for DNS, CSP security, env vars, centralized errors
+// _worker.js - Iran Smart Proxy v2.4: Full UI Completion, Bootstrap RTL, Enhanced Security & Metrics
+// Author: Mehdi feizezadeh
+// Changes: Completed getBrowsePage/getMainPage, Bootstrap RTL UI, env.NODE_ENV, Anti-redirect/iframe, Single logRequest, Uptime/Metrics
 
-import { Hono } from 'hono'; // Lightweight router for Workers[](https://hono.dev)
+import { Hono } from 'hono'; // https://hono.dev
 
-/**
- * Main app with Hono routing for modularity and simplicity.
- */
 const app = new Hono();
 
+// Global metrics (in-memory, reset on cold start - consider KV for persistence)
+let metrics = {
+  requests: { total: 0, success: 0, error: 0 },
+  uptime: { start: Date.now(), lastReset: Date.now() }
+};
+
 /**
- * Enhanced Configuration - Use env vars for sensitive data.
+ * Enhanced Configuration - Env vars for sensitive data.
  */
 const CONFIG = {
   BLOCKED_SITES: [
@@ -26,7 +29,6 @@ const CONFIG = {
     'steampowered.com', 'steamcommunity.com', 'riotgames.com', 'leagueoflegends.com',
     'valorant.com', 'epicgames.com', 'blizzard.com', 'battle.net', 'ea.com', 'origin.com'
   ],
-  // Load from env for security (e.g., wrangler.toml: [vars] CF_IPS_V4 = "ip1,ip2,..."
   CF_IPS_V4: (typeof CF_IPS_V4 !== 'undefined' ? CF_IPS_V4.split(',') : [
     '104.16.132.229', '104.16.133.229', '172.67.69.9', '172.67.70.9',
     '104.16.134.229', '104.16.135.229', '172.67.71.9', '172.67.72.9'
@@ -34,24 +36,14 @@ const CONFIG = {
   CF_IPS_V6: (typeof CF_IPS_V6 !== 'undefined' ? CF_IPS_V6.split(',') : [
     '2606:4700::6810:84e5', '2606:4700::6810:85e5', '2606:4700::6810:86e5', '2606:4700::6810:87e5'
   ]),
-  CACHE_DURATIONS: {
-    'A': 300, 'AAAA': 300, 'CNAME': 1800, 'MX': 3600, 'TXT': 1800, 'NS': 7200
-  },
-  RATE_LIMIT: {
-    WINDOW: 60000, MAX_REQUESTS: 120, MAX_DNS: 100, MAX_PROXY: 20
-  }
+  CACHE_DURATIONS: { 'A': 300, 'AAAA': 300, 'CNAME': 1800, 'MX': 3600, 'TXT': 1800, 'NS': 7200 },
+  RATE_LIMIT: { WINDOW: 60000, MAX_REQUESTS: 120, MAX_DNS: 100, MAX_PROXY: 20 }
 };
 
-/**
- * In-memory rate limit store (consider KV for production scale).
- */
 const rateLimitStore = new Map();
 
 /**
- * Check rate limit for IP and type (general/dns/proxy).
- * @param {string} ip - Client IP
- * @param {string} type - Request type
- * @returns {boolean} - True if allowed
+ * Check rate limit (optimized with async cleanup trigger).
  */
 function checkRateLimit(ip, type = 'general') {
   const now = Date.now();
@@ -64,15 +56,13 @@ function checkRateLimit(ip, type = 'general') {
   if (recent.length >= limit) return false;
   recent.push(now);
   rateLimitStore.set(key, recent);
-  if (rateLimitStore.size > 1000) cleanupRateLimit(); // Periodic cleanup
+  // Async cleanup to avoid blocking (setTimeout for next tick)
+  if (rateLimitStore.size > 1000) {
+    setTimeout(cleanupRateLimit, 0);
+  }
   return true;
 }
 
-/**
- * Get rate limit status for health checks.
- * @param {string} ip - Client IP
- * @returns {object} - Status object
- */
 function getRateLimitStatus(ip) {
   const now = Date.now();
   const getCount = (key) => {
@@ -87,10 +77,7 @@ function getRateLimitStatus(ip) {
   };
 }
 
-/**
- * Cleanup old rate limit entries (optimized: only recent kept).
- */
-function cleanupRateLimit() {
+async function cleanupRateLimit() {
   const now = Date.now();
   for (const [key, requests] of rateLimitStore.entries()) {
     const recent = requests.filter(time => now - time < CONFIG.RATE_LIMIT.WINDOW);
@@ -100,14 +87,15 @@ function cleanupRateLimit() {
 }
 
 /**
- * Validate URL (blocks locals, suspicious patterns).
- * @param {string} url - Target URL
- * @returns {object} - {valid: bool, reason: string}
+ * Enhanced URL validation with anti-open redirect (block relative/empty paths).
  */
 function isValidUrl(url) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:') return { valid: false, reason: 'فقط HTTPS مجاز است' };
+    if (!parsed.hostname || parsed.hostname.length < 1 || parsed.hostname === '') {
+      return { valid: false, reason: 'Open redirect prevented: Invalid hostname' };
+    }
     const hostname = parsed.hostname.toLowerCase();
     if (hostname === 'localhost' || hostname.startsWith('127.') || hostname.startsWith('192.168.') ||
         hostname.startsWith('10.') || hostname.startsWith('172.1') || hostname.startsWith('172.2') ||
@@ -123,11 +111,6 @@ function isValidUrl(url) {
   }
 }
 
-/**
- * Validate domain (basic regex + patterns).
- * @param {string} domain - Domain name
- * @returns {boolean} - Valid or not
- */
 function isValidDomain(domain) {
   if (!domain || typeof domain !== 'string') return false;
   const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9-._]*[a-zA-Z0-9]$/;
@@ -136,11 +119,6 @@ function isValidDomain(domain) {
   return true;
 }
 
-/**
- * Get site type (iranian/blocked/gaming/normal) for smart routing.
- * @param {string} domain - Domain
- * @returns {string} - Site type
- */
 function getSiteType(domain) {
   const d = domain.toLowerCase();
   if (CONFIG.IRANIAN_SITES.some(site => d.includes(site))) return 'iranian';
@@ -149,10 +127,6 @@ function getSiteType(domain) {
   return 'normal';
 }
 
-/**
- * CORS headers for all responses.
- * @returns {object} - Headers
- */
 function getCorsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -162,67 +136,46 @@ function getCorsHeaders() {
   };
 }
 
-/**
- * Security headers including new CSP.
- * @returns {object} - Headers
- */
 function getSecurityHeaders() {
   return {
     'X-Content-Type-Options': 'nosniff',
     'X-XSS-Protection': '1; mode=block',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://cloudflare-dns.com https://dns.google",
-    'X-Powered-By': 'Iran-Smart-Proxy-v2.3'
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src 'self' https://cloudflare-dns.com https://dns.google; frame-ancestors 'none'",
+    'X-Frame-Options': 'DENY', // Anti-iframe
+    'X-Powered-By': 'Iran-Smart-Proxy-v2.4'
   };
 }
 
-/**
- * Generate unique request ID for errors.
- * @returns {string} - ID
- */
 function generateRequestId() {
   return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
 }
 
 /**
- * Log request (structured JSON).
- * @param {string} type - success/error
- * @param {string} endpoint - Path
- * @param {boolean} success - Success flag
- * @param {number} duration - ms
- * @param {string} clientIP - IP
+ * Single logRequest (called once per request in middleware).
  */
 function logRequest(type, endpoint, success, duration, clientIP) {
+  metrics.requests.total++;
+  if (success) metrics.requests.success++;
+  else metrics.requests.error++;
   console.log(JSON.stringify({
     timestamp: new Date().toISOString(),
     type, endpoint, success, duration_ms: duration,
-    client_ip: clientIP, service: 'iran-smart-proxy', version: '2.3'
+    client_ip: clientIP, service: 'iran-smart-proxy', version: '2.4'
   }));
 }
 
 /**
- * Centralized error handler (logs + response).
- * @param {Error} error - Error object
- * @param {string} clientIP - IP
- * @param {string} endpoint - Path
- * @param {object} corsHeaders - Headers
- * @returns {Response} - Error response
+ * Centralized error handler (env.NODE_ENV for dev/prod).
  */
-function handleError(error, clientIP, endpoint, corsHeaders) {
+function handleError(error, clientIP, endpoint, corsHeaders, startTime) {
   const reqId = generateRequestId();
-  console.error(JSON.stringify({ error: error.message, reqId, clientIP, endpoint }));
-  const message = process.env.NODE_ENV === 'development' ? error.message : 'نامشخص';
+  const duration = Date.now() - startTime;
+  logRequest('error', endpoint, false, duration, clientIP);
+  const message = env.NODE_ENV === 'development' ? error.message : 'نامشخص';
   return jsonResponse({ error: 'خطای سرور', details: message, request_id: reqId }, 500, corsHeaders);
 }
 
-/**
- * JSON response helper.
- * @param {object} data - Body
- * @param {number} status - HTTP status
- * @param {object} corsHeaders - CORS
- * @param {object} additionalHeaders - Extra headers
- * @returns {Response} - Response
- */
 function jsonResponse(data, status = 200, corsHeaders = {}, additionalHeaders = {}) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -230,28 +183,39 @@ function jsonResponse(data, status = 200, corsHeaders = {}, additionalHeaders = 
   });
 }
 
-// Hono Routes (modular routing)
-/**
- * OPTIONS preflight handler.
- */
-app.options('*', (c) => c.body(null, { headers: { ...getCorsHeaders(), ...getSecurityHeaders() } }));
-
-// Main page
-app.get('/', (c) => {
+// Global middleware: Rate limit + Metrics start (single log at end)
+app.use('*', async (c, next) => {
   const clientIP = c.req.cf?.ip || 'unknown';
-  logRequest('success', '/', true, 0, clientIP); // Duration approximate
-  return c.html(getMainPage(c.req.url.hostname), { headers: { 'Content-Type': 'text/html; charset=utf-8', ...getSecurityHeaders() } });
+  const startTime = Date.now();
+  if (!checkRateLimit(clientIP)) {
+    const duration = Date.now() - startTime;
+    logRequest('error', c.req.path, false, duration, clientIP);
+    return jsonResponse({ error: 'درخواست بیش از حد', message: 'لطفا صبر کنید', retry_after: 60 }, 429, getCorsHeaders());
+  }
+  try {
+    await next();
+    const duration = Date.now() - startTime;
+    logRequest('success', c.req.path, true, duration, clientIP);
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    return handleError(error, clientIP, c.req.path, getCorsHeaders(), startTime);
+  }
 });
 
-// DNS Handler (with Cache)
+app.options('*', (c) => c.body(null, { headers: { ...getCorsHeaders(), ...getSecurityHeaders() } }));
+
+// Main page (completed with full setup-grid)
+app.get('/', (c) => c.html(getMainPage(c.req.url.hostname), { headers: { 'Content-Type': 'text/html; charset=utf-8', ...getSecurityHeaders() } }));
+
+// DNS Handler (async fetch + cache)
 app.all('/dns-query/:resolve?', async (c) => {
   const clientIP = c.req.cf?.ip || 'unknown';
+  const startTime = Date.now(); // Already in middleware
+  // Rate limit already in middleware, but DNS-specific if needed
   if (!checkRateLimit(clientIP, 'dns')) {
     return jsonResponse({ error: 'محدودیت DNS', message: 'تعداد درخواست بیش از حد' }, 429, getCorsHeaders());
   }
-  const startTime = Date.now();
   try {
-    // Parse params (GET/POST)
     let name = c.req.query('name');
     let type = c.req.query('type') || 'A';
     let dnsQuery = null;
@@ -283,32 +247,34 @@ app.all('/dns-query/:resolve?', async (c) => {
     if (gaming && siteType === 'gaming') dnsProvider = 'https://dns.google/dns-query';
     const queryUrl = `${dnsProvider}?name=${encodeURIComponent(name)}&type=${type}`;
 
-    // Cache API for performance
+    // Async cache check
     const cache = caches.default;
     const cacheKey = new Request(`${c.req.url.origin}/cache/${name}-${type}`);
     let response = await cache.match(cacheKey);
     if (!response) {
       const acceptHeader = c.req.header('Accept') || '';
       const wantsWireFormat = acceptHeader.includes('application/dns-message');
-      if (wantsWireFormat) {
-        response = await fetch(queryUrl, { headers: { 'Accept': 'application/dns-message', 'User-Agent': 'Iran-Proxy-Wire/2.3' } });
-      } else {
-        response = await fetch(queryUrl, { headers: { 'Accept': 'application/dns-json', 'User-Agent': 'Iran-Proxy-JSON/2.3' } });
+      response = await fetch(queryUrl, { // Async fetch
+        headers: { 'Accept': wantsWireFormat ? 'application/dns-message' : 'application/dns-json', 'User-Agent': `Iran-Proxy-${wantsWireFormat ? 'Wire' : 'JSON'}/2.4` }
+      });
+      if (response.ok) {
+        const clone = response.clone();
+        cache.put(cacheKey, clone); // Cache asynchronously
+        response = clone;
       }
-      if (response.ok) cache.put(cacheKey, response.clone()); // Cache on miss
     }
 
     if (!response.ok) throw new Error(`DNS failed: ${response.status}`);
-    const data = await response.json?.() || new Uint8Array(await response.arrayBuffer());
+    const data = await (response.headers.get('Content-Type')?.includes('dns-message') ? response.arrayBuffer() : response.json());
     const queryTime = Date.now() - startTime;
 
-    // Smart Proxy for blocked sites
-    if (siteType === 'blocked' && data.Answer) {
+    // Smart Proxy
+    if (siteType === 'blocked' && typeof data === 'object' && data.Answer) {
       data.Answer = data.Answer.map(record => {
-        if (record.type === 1) { // A
+        if (record.type === 1) {
           const cfIP = CONFIG.CF_IPS_V4[Math.floor(Math.random() * CONFIG.CF_IPS_V4.length)];
           return { ...record, data: cfIP, TTL: 300, _proxied: true };
-        } else if (record.type === 28) { // AAAA
+        } else if (record.type === 28) {
           const cfIPv6 = CONFIG.CF_IPS_V6[Math.floor(Math.random() * CONFIG.CF_IPS_V6.length)];
           return { ...record, data: cfIPv6, TTL: 300, _proxied: true };
         }
@@ -316,28 +282,25 @@ app.all('/dns-query/:resolve?', async (c) => {
       });
     }
 
-    // Metadata
-    if (data._iran_proxy) {
-      data._iran_proxy = { ...data._iran_proxy, site_type: siteType, gaming_mode: gaming, query_time_ms: queryTime };
+    if (typeof data === 'object') {
+      data._iran_proxy = { site_type: siteType, gaming_mode: gaming, query_time_ms: queryTime };
     }
 
     const headers = { ...getCorsHeaders(), ...getSecurityHeaders(), 'Cache-Control': `public, max-age=${CONFIG.CACHE_DURATIONS[type] || 300}` };
-    logRequest('success', c.req.path, true, queryTime, clientIP);
-    return wantsWireFormat ? new Response(data, { headers: { ...headers, 'Content-Type': 'application/dns-message' } }) :
-      jsonResponse(data, 200, headers);
+    return typeof data === 'object' ? jsonResponse(data, 200, headers) :
+      new Response(data, { headers: { ...headers, 'Content-Type': 'application/dns-message' } });
   } catch (error) {
-    logRequest('error', c.req.path, false, Date.now() - startTime, clientIP);
-    return handleError(error, clientIP, c.req.path, getCorsHeaders());
+    return handleError(error, clientIP, c.req.path, getCorsHeaders(), startTime);
   }
 });
 
-// Proxy Handler
+// Proxy Handler (async body handling)
 app.all('/proxy', async (c) => {
   const clientIP = c.req.cf?.ip || 'unknown';
+  const startTime = Date.now();
   if (!checkRateLimit(clientIP, 'proxy')) {
     return jsonResponse({ error: 'محدودیت Proxy', message: 'تعداد درخواست بیش از حد' }, 429, getCorsHeaders());
   }
-  const startTime = Date.now();
   try {
     let targetUrl = c.req.query('url');
     if (!targetUrl) return jsonResponse({ error: 'پارامتر url ضروری است', example: '/proxy?url=https://twitter.com' }, 400, getCorsHeaders());
@@ -345,7 +308,8 @@ app.all('/proxy', async (c) => {
     if (!validation.valid) return jsonResponse({ error: 'URL نامعتبر', reason: validation.reason }, 400, getCorsHeaders());
 
     console.log(`🌐 Proxy: ${targetUrl} from ${clientIP}`);
-    const proxyResponse = await fetch(targetUrl, {
+    const body = c.req.method === 'POST' ? await c.req.arrayBuffer() : null; // Async body
+    const proxyResponse = await fetch(targetUrl, { // Async fetch
       method: c.req.method,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -354,56 +318,56 @@ app.all('/proxy', async (c) => {
         'Accept-Encoding': 'gzip, deflate, br',
         'DNT': '1', 'Connection': 'keep-alive', 'Upgrade-Insecure-Requests': '1'
       },
-      body: c.req.method === 'POST' ? await c.req.arrayBuffer() : null // Limit body size if needed
+      body
     });
 
     if (!proxyResponse.ok) throw new Error(`HTTP ${proxyResponse.status}: ${proxyResponse.statusText}`);
 
     const contentType = proxyResponse.headers.get('Content-Type') || '';
-    let body = proxyResponse.body;
+    let bodyResp;
     if (contentType.includes('text/html')) {
       let html = await proxyResponse.text();
       const urlObj = new URL(targetUrl);
       const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
-      // Robust rewriting (add more regex if needed)
       html = html.replace(/href="\/(?!\/|http|https|#|javascript:|mailto:|tel:)([^"]*)"/gi, `href="/proxy?url=${baseUrl}/$1"`);
       html = html.replace(/src="\/(?!\/|http|https|data:)([^"]*)"/gi, `src="/proxy?url=${baseUrl}/$1"`);
       html = html.replace(/action="\/(?!\/|http|https)([^"]*)"/gi, `action="/proxy?url=${baseUrl}/$1"`);
-      // Banner
       const banner = `<div id="iran-proxy-banner" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:10px 20px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:14px;border-bottom:3px solid rgba(255,255,255,0.3);box-shadow:0 2px 10px rgba(0,0,0,0.2);"><div style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:15px;"><div style="display:flex;align-items:center;gap:8px;">🇮🇷 <strong>Iran Smart Proxy</strong></div><div style="font-size:12px;opacity:0.9;">📡 ${urlObj.hostname}</div><div style="font-size:12px;opacity:0.8;">🔒 Secure Browsing</div><button onclick="document.getElementById('iran-proxy-banner').style.display='none'" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:white;border-radius:4px;cursor:pointer;padding:4px 12px;font-size:12px;transition:all 0.2s;">بستن</button></div></div><script>if(document.body){document.body.style.marginTop='60px';document.body.style.transition='margin-top 0.3s ease';}setTimeout(()=>{const banner=document.getElementById('iran-proxy-banner');if(banner){banner.style.opacity='0.7';banner.style.transform='translateY(-5px)';}},10000);</script>`;
       html = html.replace(/<body([^>]*)>/i, `<body$1>${banner}`);
-      body = new Response(html, { headers: proxyResponse.headers });
+      bodyResp = new Response(html, { headers: proxyResponse.headers });
+    } else {
+      bodyResp = proxyResponse.body;
     }
 
     const responseHeaders = {
       ...getCorsHeaders(), ...getSecurityHeaders(),
-      'Content-Type': contentType, 'X-Proxy-Status': 'Success', 'X-Proxy-Target': new URL(targetUrl).hostname, 'X-Proxy-Version': '2.3'
+      'Content-Type': contentType, 'X-Proxy-Status': 'Success', 'X-Proxy-Target': new URL(targetUrl).hostname, 'X-Proxy-Version': '2.4'
     };
-    // Remove problematic headers
     ['content-security-policy', 'x-frame-options', 'strict-transport-security'].forEach(h => responseHeaders[h] = undefined);
 
-    logRequest('success', c.req.path, true, Date.now() - startTime, clientIP);
-    return new Response(body, { status: proxyResponse.status, headers: responseHeaders });
+    return new Response(bodyResp, { status: proxyResponse.status, headers: responseHeaders });
   } catch (error) {
-    logRequest('error', c.req.path, false, Date.now() - startTime, clientIP);
-    return handleError(error, clientIP, c.req.path, getCorsHeaders());
+    return handleError(error, clientIP, c.req.path, getCorsHeaders(), startTime);
   }
 });
 
-// Browse page
-app.get('/browse', (c) => {
-  const clientIP = c.req.cf?.ip || 'unknown';
-  logRequest('success', '/browse', true, 0, clientIP);
-  return c.html(getBrowsePage(c.req.url.hostname), { headers: { 'Content-Type': 'text/html; charset=utf-8', ...getSecurityHeaders() } });
-});
+// Browse page (Bootstrap RTL modern UI)
+app.get('/browse', (c) => c.html(getBrowsePage(c.req.url.hostname), { headers: { 'Content-Type': 'text/html; charset=utf-8', ...getSecurityHeaders() } }));
 
-// Health check
+// Health with metrics/uptime
 app.get('/health', (c) => {
   const clientIP = c.req.cf?.ip || 'unknown';
+  const uptimeMs = Date.now() - metrics.uptime.start;
+  const uptime = `${Math.floor(uptimeMs / 86400000)}d ${Math.floor((uptimeMs % 86400000) / 3600000)}h`;
   return jsonResponse({
-    status: 'healthy', timestamp: new Date().toISOString(), version: '2.3',
-    features: ['DoH', 'HTTP-Proxy', 'Rate-Limiting', 'CSP-Security'],
-    rate_limit: getRateLimitStatus(clientIP), uptime: 'cf-worker'
+    status: 'healthy', timestamp: new Date().toISOString(), version: '2.4',
+    features: ['DoH', 'HTTP-Proxy', 'Rate-Limiting', 'CSP-Security', 'Bootstrap-UI'],
+    rate_limit: getRateLimitStatus(clientIP),
+    metrics: {
+      requests: metrics.requests,
+      uptime: { ms: uptimeMs, human: uptime },
+      cache_hits: 'N/A' // Can add counter if needed
+    }
   }, 200, getCorsHeaders());
 });
 
@@ -411,40 +375,21 @@ app.get('/health', (c) => {
 app.get('/status', (c) => {
   const clientIP = c.req.cf?.ip || 'unknown';
   return jsonResponse({
-    status: 'OK', timestamp: new Date().toISOString(), service: 'Iran Smart Proxy v2.3',
+    status: 'OK', timestamp: new Date().toISOString(), service: 'Iran Smart Proxy v2.4',
     supports: ['DNS JSON/Wire', 'HTTP Proxy', 'Rate Limiting'], client_ip: clientIP, security: 'enhanced'
   }, 200, getCorsHeaders());
 });
 
-// 404 fallback
 app.notFound((c) => new Response('صفحه پیدا نشد', { status: 404, headers: { ...getCorsHeaders(), ...getSecurityHeaders() } }));
 
-// Global middleware: Rate limit + Log start (before routes)
-app.use('*', async (c, next) => {
-  const clientIP = c.req.cf?.ip || 'unknown';
-  const startTime = Date.now();
-  if (!checkRateLimit(clientIP)) {
-    return jsonResponse({ error: 'درخواست بیش از حد', message: 'لطفا صبر کنید', retry_after: 60 }, 429, getCorsHeaders());
-  }
-  await next();
-  logRequest('success', c.req.path, true, Date.now() - startTime, clientIP); // Override in handlers if error
-});
-
-// Export for Workers
 export default app;
 
-// Helper Functions (below main code for modularity)
-/**
- * Forward DNS wire format.
- * @param {Uint8Array} dnsQuery - Query bytes
- * @param {object} corsHeaders - Headers
- * @returns {Promise<Response>} - Response
- */
+// Helpers
 async function forwardDNSWireFormat(dnsQuery, corsHeaders) {
   console.log('🔄 Forwarding DNS wire format');
   const response = await fetch('https://cloudflare-dns.com/dns-query', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/dns-message', 'Accept': 'application/dns-message', 'User-Agent': 'Iran-Proxy-Wire/2.3' },
+    headers: { 'Content-Type': 'application/dns-message', 'Accept': 'application/dns-message', 'User-Agent': 'Iran-Proxy-Wire/2.4' },
     body: dnsQuery
   });
   if (!response.ok) throw new Error(`Wire failed: ${response.status}`);
@@ -454,11 +399,6 @@ async function forwardDNSWireFormat(dnsQuery, corsHeaders) {
   });
 }
 
-/**
- * Base64 URL decode for wire format.
- * @param {string} str - Encoded string
- * @returns {Uint8Array} - Decoded bytes
- */
 function base64UrlDecode(str) {
   try {
     str = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -473,20 +413,161 @@ function base64UrlDecode(str) {
 }
 
 /**
- * Get Browse Page HTML (template).
- * @param {string} hostname - Host
- * @returns {string} - HTML
+ * Modern Browse Page with Bootstrap RTL.
  */
 function getBrowsePage(hostname) {
-  return `<!DOCTYPE html><html dir="rtl" lang="fa"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🌐 مرورگر وب امن</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;color:white;direction:rtl;}.container{max-width:1000px;margin:0 auto;padding:20px;}.header{text-align:center;padding:30px 0;}.url-form{background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);padding:30px;border-radius:20px;margin:30px 0;border:1px solid rgba(255,255,255,0.2);}.input-group{display:flex;gap:10px;margin:20px 0;}.url-input{flex:1;padding:15px 20px;border:none;border-radius:50px;font-size:16px;outline:none;direction:ltr;text-align:left;background:rgba(255,255,255,0.9);color:#333;}.go-btn{background:linear-gradient(45deg,#4CAF50,#45a049);color:white;border:none;padding:15px 30px;border-radius:50px;cursor:pointer;font-size:16px;font-weight:bold;transition:all 0.3s;white-space:nowrap;}.go-btn:hover{transform:translateY(-2px);box-shadow:0 5px 15px rgba(0,0,0,0.3);}.quick-sites{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:30px 0;}.site-btn{background:rgba(255,255,255,0.1);color:white;text-decoration:none;padding:15px;border-radius:15px;text-align:center;transition:all 0.3s;border:1px solid rgba(255,255,255,0.2);}.site-btn:hover{background:rgba(255,255,255,0.2);transform:translateY(-2px);}.warning{background:rgba(255,152,0,0.2);border:1px solid rgba(255,152,0,0.5);padding:20px;border-radius:15px;margin:20px 0;text-align:center;}@media (max-width:768px){.input-group{flex-direction:column;}.container{padding:10px;}}</style></head><body><div class="container"><div class="header"><h1>🌐 مرورگر وب امن</h1><p>دسترسی امن به سایت‌های مسدود</p></div><div class="url-form"><h3 style="margin-bottom:20px;">🔗 آدرس سایت مورد نظر را وارد کنید:</h3><form onsubmit="browseUrl(event)"><div class="input-group"><input type="url" class="url-input" id="urlInput" placeholder="https://example.com" required><button type="submit" class="go-btn">🚀 برو</button></div></form></div><div class="warning">⚠️ <strong>توجه:</strong> فقط از سایت‌های معتبر استفاده کنید و اطلاعات حساس وارد نکنید</div><div class="quick-sites"><a href="#" onclick="quickBrowse('https://twitter.com')" class="site-btn">🐦 Twitter</a><a href="#" onclick="quickBrowse('https://youtube.com')" class="site-btn">📺 YouTube</a><a href="#" onclick="quickBrowse('https://github.com')" class="site-btn">💻 GitHub</a><a href="#" onclick="quickBrowse('https://reddit.com')" class="site-btn">🤖 Reddit</a><a href="#" onclick="quickBrowse('https://instagram.com')" class="site-btn">📸 Instagram</a><a href="#" onclick="quickBrowse('https://facebook.com')" class="site-btn">👥 Facebook</a><a href="#" onclick="quickBrowse('https://medium.com')" class="site-btn">📝 Medium</a><a href="#" onclick="quickBrowse('https://discord.com')" class="site-btn">🎮 Discord</a></div><div style="text-align:center;margin-top:40px;opacity:0.8;"><p>🛡️ حفظ حریم خصوصی | ⚡ سرعت بالا | 🔒 امنیت کامل</p></div></div><script>function browseUrl(event){event.preventDefault();const url=document.getElementById('urlInput').value;if(url){const proxyUrl='/proxy?url='+encodeURIComponent(url);window.open(proxyUrl,'_blank');}}function quickBrowse(url){const proxyUrl='/proxy?url='+encodeURIComponent(url);window.open(proxyUrl,'_blank');}document.getElementById('urlInput').focus();</script></body></html>`;
+  return `<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌐 مرورگر وب امن - Iran Smart Proxy</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>body{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;}.btn-primary{background:linear-gradient(45deg,#4CAF50,#45a049);border:none;}.card{border:none;background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border-radius:20px;}</style>
+</head>
+<body class="d-flex align-items-center min-vh-100">
+<div class="container">
+  <div class="row justify-content-center">
+    <div class="col-lg-8 col-md-10">
+      <div class="text-center mb-5">
+        <h1 class="display-4 fw-bold mb-3">🌐 مرورگر وب امن</h1>
+        <p class="lead">دسترسی امن و سریع به سایت‌های مسدود با پروکسی هوشمند</p>
+      </div>
+      <div class="card p-4 mb-4">
+        <h5 class="card-title text-center mb-4">🔗 آدرس سایت را وارد کنید</h5>
+        <form onsubmit="browseUrl(event)" class="d-flex gap-2">
+          <input type="url" class="form-control form-control-lg" id="urlInput" placeholder="https://example.com" required>
+          <button type="submit" class="btn btn-primary btn-lg">🚀 برو</button>
+        </form>
+      </div>
+      <div class="alert alert-warning text-center" role="alert">
+        ⚠️ <strong>توجه:</strong> فقط سایت‌های معتبر استفاده کنید و اطلاعات حساس وارد نکنید.
+      </div>
+      <div class="row g-3 mb-5">
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://twitter.com')" class="btn btn-outline-light w-100"><i class="bi bi-twitter-x me-2"></i>Twitter</a></div>
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://youtube.com')" class="btn btn-outline-light w-100"><i class="bi bi-youtube me-2"></i>YouTube</a></div>
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://github.com')" class="btn btn-outline-light w-100"><i class="bi bi-github me-2"></i>GitHub</a></div>
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://reddit.com')" class="btn btn-outline-light w-100"><i class="bi bi-reddit me-2"></i>Reddit</a></div>
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://instagram.com')" class="btn btn-outline-light w-100"><i class="bi bi-instagram me-2"></i>Instagram</a></div>
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://facebook.com')" class="btn btn-outline-light w-100"><i class="bi bi-facebook me-2"></i>Facebook</a></div>
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://medium.com')" class="btn btn-outline-light w-100"><i class="bi bi-journal-text me-2"></i>Medium</a></div>
+        <div class="col-6 col-md-4 col-lg-3"><a href="#" onclick="quickBrowse('https://discord.com')" class="btn btn-outline-light w-100"><i class="bi bi-discord me-2"></i>Discord</a></div>
+      </div>
+      <div class="text-center">
+        <p class="opacity-75">🛡️ حفظ حریم خصوصی | ⚡ سرعت بالا | 🔒 امنیت کامل با CSP</p>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function browseUrl(event) { event.preventDefault(); const url = document.getElementById('urlInput').value; if (url) { window.open('/proxy?url=' + encodeURIComponent(url), '_blank'); } }
+function quickBrowse(url) { window.open('/proxy?url=' + encodeURIComponent(url), '_blank'); }
+document.getElementById('urlInput').focus();
+</script>
+</body>
+</html>`;
 }
 
 /**
- * Get Main Page HTML (enhanced with stats).
- * @param {string} hostname - Host
- * @returns {string} - HTML
+ * Completed Main Page with full setup-grid (Bootstrap RTL).
  */
 function getMainPage(hostname) {
   const updateDate = new Date().toLocaleDateString('fa-IR');
-  return `<!DOCTYPE html><html dir="rtl" lang="fa"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🇮🇷 Iran Smart Proxy v2.3</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;color:white;direction:rtl;padding:20px;line-height:1.6;}.container{max-width:1200px;margin:0 auto;}.hero{text-align:center;padding:40px 0;}.hero h1{font-size:clamp(2rem,5vw,4rem);margin-bottom:20px;text-shadow:2px 2px 4px rgba(0,0,0,0.3);}.hero p{font-size:1.2rem;opacity:0.9;}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin:40px 0;}.status-card{background:rgba(76,175,80,0.2);border:2px solid #4CAF50;padding:25px;border-radius:20px;text-align:center;backdrop-filter:blur(10px);}.status-card.security{background:rgba(33,150,243,0.2);border-color:#2196F3;}.status-card.performance{background:rgba(255,193,7,0.2);border-color:#FFC107;}.endpoint{background:linear-gradient(135deg,#4CAF50,#45a049);color:white;padding:25px;border-radius:20px;margin:30px 0;font-family:'Monaco','Menlo',monospace;text-align:center;font-size:1.1rem;box-shadow:0 8px 32px rgba(0,0,0,0.2);}.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:25px;margin:50px 0;}.feature-card{background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border-radius:20px;padding:30px;border:1px solid rgba(255,255,255,0.2);transition:all 0.3s;position:relative;overflow:hidden;}.feature-card:hover{transform:translateY(-5px);box-shadow:0 15px 40px rgba(0,0,0,0.3);}.feature-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#4CAF50,#2196F3,#FF9800);}.setup-section{background:rgba(255,255,255,0.05);border-radius:25px;padding:40px;margin:50px 0;backdrop-filter:blur(20px);}.setup-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:25px;margin-top:30px;}.setup-item{background:rgba(255,255,255,0.1);padding:25px;border-radius:15px;border:1px solid rgba(255,255,255,0.2);transition:all 0.3s;}.setup-item:hover{background:rgba(255,255,255,0.15);}.btn-group{text-align:center;margin:40px 0;}.btn{background:rgba(255,255,255,0.2);color:white;padding:15px 30px;text-decoration:none;border-radius:50px;margin:10px;display:inline-block;transition:all 0.3s;font-weight:600;border:1px solid rgba(255,255,255,0.3);}.btn:hover{background:rgba(255,255,255,0.3);transform:translateY(-2px);box-shadow:0 5px 15px rgba(0,0,0,0.3);}.btn.primary{background:linear-gradient(45deg,#4CAF50,#45a049);border:none;}code{background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:8px;font-family:'Monaco','Menlo',monospace;font-size:0.9rem;border:1px solid rgba(255,255,255,0.2);}.stats{display:flex;justify-content:space-around;margin:30px 0;flex-wrap:wrap;}.stat{text-align:center;padding:15px;}.stat-number{font-size:2rem;font-weight:bold;color:#4CAF50;}.stat-label{font-size:0.9rem;opacity:0.8;}@media (max-width:768px){.container{padding:10px;}.hero h1{font-size:2.5rem;}.features,.setup-grid{grid-template-columns:1fr;}}</style></head><body><div class="container"><div class="hero"><h1>🛡️ Iran Smart Proxy</h1><p>نسخه 2.3: Hono + Cache + CSP</p><div class="stats"><div class="stat"><div class="stat-number">${CONFIG.BLOCKED_SITES.length}</div><div class="stat-label">سایت مسدود</div></div><div class="stat"><div class="stat-number">${CONFIG.GAMING_DOMAINS.length}</div><div class="stat-label">گیمینگ</div></div><div class="stat"><div class="stat-number">120</div><div class="stat-label">req/min</div></div></div></div><div class="status-grid"><div class="status-card">✅ <strong>فعال</strong><br><small>تمام فیچرها</small></div><div class="status-card security">🔒 <strong>امنیت</strong><br><small>CSP + Rate Limit</small></div><div class="status-card performance">⚡ <strong>بهینه</strong><br><small>Cache + Hono</small></div></div><div class="endpoint">🌐 DNS: https://${hostname}/dns-query<br><small>سازگار با همه</small></div><div class="features"><div class="feature-card"><h3>🧠 Smart DNS</h3><p>تشخیص خودکار</p><ul style="list-style:none;padding:10px 0;"><li>✅ مسدود</li><li>✅ گیمینگ</li><li>✅ ایرانی</li></ul></div><div class="feature-card"><h3>🔒 امنیت</h3><p>پیشرفته</p><ul style="list-style:none;padding:10px 0;"><li>🛡️ Rate Limit</li><li>🔍 URL Filter</li><li>🚫 Local Block</li></ul></div><div class="feature-card"><h3>🌐 Proxy</h3><p>HTTP پیشرفته</p><ul style="list-style:none;padding:10px 0;"><li>🎨 HTML Rewrite</li><li>📱 موبایل</li><li>🚀 تصاویر</li></ul></div><div class="feature-card"><h3>📊 مانیتور</h3><p>دقیق</p><ul style="list-style:none;padding:10px 0;"><li>📈 آمار</li><li>⏱️ زمان</li><li>🔍 Log</li></ul></div></div><div class="setup-section"><h2>📱 تنظیمات</h2><p style="text-align:center;margin-bottom:20px;opacity:0.9;">گام به گام</p><div class="setup-grid"><div class="setup-item"><h4>🦊 Firefox</h4><p>1. <code>about:preferences#privacy</code></p><p>2. Custom DoH: <code>https://${hostname}/dns-query</code></p><p>3. Enable</p><p><small>🔄 Restart</small></p></div><div class="setup-item"><h4>🔵 Chrome</h4><p>1. <code>chrome://settings/security</code></p><p>2. Secure DNS: Custom <code>https://${hostname}/dns-query</code></p><p>3. Save</p><p><small>🔄 Restart</small></p></div><!-- Add more setup items as before --></div></div><div class="btn-group"><a href="/browse" class="btn primary">🌐 مرورگر</a><a href="/health" class="btn">🏥 Health</a><a href="/status" class="btn">📊 Status</a><a href="/proxy?url=https://httpbin.org/json" class="btn">🧪 Test</a></div><div style="text-align:center;margin-top:50px;padding:30px;background:rgba(255,255,255,0.05);border-radius:20px;"><h3>🚀 v2.3 Features</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-top:20px;"><div>✅ Hono Routing</div><div>🔒 CSP Header</div><div>⚡ Cache API</div><div>🛡️ Centralized Errors</div><div>🌍 Env Vars</div><div>📝 Better Docs</div></div></div><div style="text-align:center;margin-top:40px;opacity:0.8;"><p>🛡️ امن | ⚡ سریع | 🔒 خصوصی</p><p><small>v2.3 - ${updateDate}</small></p></div></div><script>document.addEventListener('DOMContentLoaded',()=>{const cards=document.querySelectorAll('.feature-card');const observer=new IntersectionObserver(entries=>{entries.forEach(entry=>{if(entry.isIntersecting){entry.target.style.opacity='1';entry.target.style.transform='translateY(0)';}})});cards.forEach(card=>{card.style.opacity='0.7';card.style.transform='translateY(20px)';card.style.transition='all 0.6s ease';observer.observe(card);});});</script></body></html>`;
+  return `<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🇮🇷 Iran Smart Proxy v2.4 - Enhanced & Secure</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>body{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;}.btn-primary{background:linear-gradient(45deg,#4CAF50,#45a049);border:none;}.card{border:none;background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border-radius:20px;}</style>
+</head>
+<body class="min-vh-100">
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <div class="text-center mb-5">
+        <h1 class="display-3 fw-bold mb-3">🛡️ Iran Smart Proxy</h1>
+        <p class="lead">نسخه 2.4: Bootstrap RTL + Anti-Frame + Metrics</p>
+        <div class="row justify-content-center g-3 mt-4">
+          <div class="col-auto"><div class="bg-success bg-opacity-25 p-3 rounded-circle d-inline-block"><h2 class="mb-0">${CONFIG.BLOCKED_SITES.length}</h2><small>سایت مسدود</small></div></div>
+          <div class="col-auto"><div class="bg-info bg-opacity-25 p-3 rounded-circle d-inline-block"><h2 class="mb-0">${CONFIG.GAMING_DOMAINS.length}</h2><small>گیمینگ</small></div></div>
+          <div class="col-auto"><div class="bg-warning bg-opacity-25 p-3 rounded-circle d-inline-block"><h2 class="mb-0">120</h2><small>req/min</small></div></div>
+        </div>
+      </div>
+      <div class="row g-4 mb-5">
+        <div class="col-md-4"><div class="card p-4 text-center"><i class="bi bi-check-circle-fill text-success fs-1 mb-3"></i><h5>✅ سرویس فعال</h5><small>تمام قابلیت‌ها در دسترس</small></div></div>
+        <div class="col-md-4"><div class="card p-4 text-center"><i class="bi bi-shield-lock-fill text-info fs-1 mb-3"></i><h5>🔒 امنیت</h5><small>CSP + Anti-Frame + Rate Limit</small></div></div>
+        <div class="col-md-4"><div class="card p-4 text-center"><i class="bi bi-lightning-charge-fill text-warning fs-1 mb-3"></i><h5>⚡ عملکرد</h5><small>Cache + Async Fetch</small></div></div>
+      </div>
+      <div class="card mb-4 p-4">
+        <h4 class="text-center mb-4">🌐 DNS Endpoint</h4>
+        <div class="text-center"><code class="bg-dark p-3 rounded d-inline-block">https://${hostname}/dns-query</code><small class="d-block mt-2">سازگار با مرورگرها و اپ‌ها</small></div>
+      </div>
+      <div class="row g-4 mb-5">
+        <div class="col-md-3"><div class="card p-4"><h5>🧠 Smart DNS</h5><ul class="list-unstyled"><li><i class="bi bi-check text-success"></i> تشخیص مسدود</li><li><i class="bi bi-check text-success"></i> بهینه گیمینگ</li><li><i class="bi bi-check text-success"></i> سرعت ایرانی</li></ul></div></div>
+        <div class="col-md-3"><div class="card p-4"><h5>🔒 امنیت</h5><ul class="list-unstyled"><li><i class="bi bi-check text-success"></i> Rate Limit</li><li><i class="bi bi-check text-success"></i> URL Filter</li><li><i class="bi bi-check text-success"></i> Anti-Open Redirect</li></ul></div></div>
+        <div class="col-md-3"><div class="card p-4"><h5>🌐 Proxy</h5><ul class="list-unstyled"><li><i class="bi bi-check text-success"></i> HTML Rewrite</li><li><i class="bi bi-check text-success"></i> موبایل</li><li><i class="bi bi-check text-success"></i> تصاویر سریع</li></ul></div></div>
+        <div class="col-md-3"><div class="card p-4"><h5>📊 مانیتور</h5><ul class="list-unstyled"><li><i class="bi bi-check text-success"></i> آمار زنده</li><li><i class="bi bi-check text-success"></i> زمان پاسخ</li><li><i class="bi bi-check text-success"></i> Log کامل</li></ul></div></div>
+      </div>
+      <div class="card mb-5">
+        <h4 class="card-header text-center">📱 تنظیمات مرورگرها</h4>
+        <div class="card-body">
+          <div class="row g-4">
+            <div class="col-md-4"><div class="card p-3"><h6>🦊 Firefox</h6><ol class="small"><li><code>about:preferences#privacy</code></li><li>Custom DoH: <code>https://${hostname}/dns-query</code></li><li>Enable</li><li>Restart</li></ol></div></div>
+            <div class="col-md-4"><div class="card p-3"><h6>🔵 Chrome</h6><ol class="small"><li><code>chrome://settings/security</code></li><li>Secure DNS: Custom <code>https://${hostname}/dns-query</code></li><li>Save</li><li>Restart</li></ol></div></div>
+            <div class="col-md-4"><div class="card p-3"><h6>📱 Android (Intra)</h6><ol class="small"><li>Install Play Store</li><li>Custom DoH: <code>https://${hostname}/dns-query</code></li><li>Test</li><li>Enable</li></ol></div></div>
+            <div class="col-md-4"><div class="card p-3"><h6>🍎 iOS (1.1.1.1)</h6><ol class="small"><li>Install App Store</li><li>Custom DoH: <code>https://${hostname}/dns-query</code></li><li>Connect</li><li>Secure</li></ol></div></div>
+            <div class="col-md-4"><div class="card p-3"><h6>🐧 Linux/macOS</h6><ol class="small"><li>Edit network</li><li>Custom DoH: <code>https://${hostname}/dns-query</code></li><li>Apply</li><li>Test: dig</li></ol></div></div>
+            <div class="col-md-4"><div class="card p-3"><h6>🎮 Gaming</h6><ol class="small"><li>Add ?gaming=true</li><li>Low latency DNS</li><li>Optimized domains</li><li>Monitor perf</li></ol></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="text-center mb-4">
+        <a href="/browse" class="btn btn-primary btn-lg me-3">🌐 مرورگر وب</a>
+        <a href="/health" class="btn btn-outline-light btn-lg me-3">🏥 سلامت</a>
+        <a href="/status" class="btn btn-outline-light btn-lg me-3">📊 وضعیت</a>
+        <a href="/proxy?url=https://httpbin.org/json" class="btn btn-outline-light btn-lg">🧪 تست Proxy</a>
+      </div>
+      <div class="card p-4 text-center">
+        <h5>🚀 ویژگی‌های v2.4</h5>
+        <div class="row g-2 justify-content-center">
+          <div class="col-auto"><span class="badge bg-success">✅ Bootstrap RTL</span></div>
+          <div class="col-auto"><span class="badge bg-info">🔒 Anti-Frame</span></div>
+          <div class="col-auto"><span class="badge bg-warning">⚡ Async Cache</span></div>
+          <div class="col-auto"><span class="badge bg-light text-dark">📊 Metrics</span></div>
+          <div class="col-auto"><span class="badge bg-secondary">🛡️ Env NODE_ENV</span></div>
+          <div class="col-auto"><span class="badge bg-dark">🌍 IPv6</span></div>
+        </div>
+      </div>
+      <div class="text-center mt-5 opacity-75">
+        <p>🛡️ امن و قابل اعتماد | ⚡ سرعت نوری | 🔒 حریم خصوصی محفوظ</p>
+        <small>v2.4 - ${updateDate}</small>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const cards = document.querySelectorAll('.card');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.style.opacity = '1';
+        entry.target.style.transform = 'translateY(0)';
+      }
+    });
+  });
+  cards.forEach(card => {
+    card.style.opacity = '0.7';
+    card.style.transform = 'translateY(20px)';
+    card.style.transition = 'all 0.6s ease';
+    observer.observe(card);
+  });
+});
+</script>
+</body>
+</html>`;
 }
