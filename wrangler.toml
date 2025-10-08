@@ -1,12 +1,14 @@
-name = "smartproxy-iran"
+name = "smartproxy-iran-enterprise"
 main = "_worker.js"
-compatibility_date = "2024-10-01"
+compatibility_date = "2025-10-08"
+
+[vars]
+ADMIN_PASSWORD = "Mefe160502"
+DEFAULT_DOH = "https://cloudflare-dns.com/dns-query"
+BUCKET_CAPACITY = "60"
+BUCKET_REFILL_PER_SEC = "1"
 
 [durable_objects]
 bindings = [
   { name = "SMARTPROXY_DO", class_name = "SmartProxyDO" }
 ]
-
-[[migrations]]
-tag = "v1"
-new_classes = ["SmartProxyDO"]
