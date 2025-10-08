@@ -172,4 +172,120 @@ function logRequest(type, endpoint, success, duration, clientIP) {
 function handleError(error, clientIP, endpoint, corsHeaders, startTime) {
   const reqId = generateRequestId();
   const duration = Date.now() - startTime;
-  logRequest('error', endpoint
+  logRequest('error', endpoint, false, duration, clientIP);
+  const message = env.NODE_ENV === 'development' ? error.message : 'نامشخص';
+  return jsonResponse({ error: 'خطای سرور', details: message, request_id: reqId }, 500, corsHeaders);
+}
+
+function jsonResponse(data, status = 200, corsHeaders = {}, additionalHeaders = {}) {
+  return new Response(JSON.stringify(data, null, 2), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json; charset=utf-8', ...additionalHeaders }
+  });
+}
+
+// Global middleware: Rate limit + Metrics start (single log at end)
+app.use('*', async (c, next) => {
+  const clientIP = c.req.cf?.ip || 'unknown';
+  const startTime = Date.now();
+  if (!checkRateLimit(clientIP)) {
+    const duration = Date.now() - startTime;
+    logRequest('error', c.req.path, false, duration, clientIP);
+    return jsonResponse({ error: 'درخواست بیش از حد', message: 'لطفا صبر کنید', retry_after: 60 }, 429, getCorsHeaders());
+  }
+  if (c.req.method === 'CONNECT') {
+    metrics.requests.connect++;
+  }
+  try {
+    await next();
+    const duration = Date.now() - startTime;
+    logRequest('success', c.req.path, true, duration, clientIP);
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    return handleError(error, clientIP, c.req.path, getCorsHeaders(), startTime);
+  }
+});
+
+app.options('*', (c) => c.body(null, { headers: { ...getCorsHeaders(), ...getSecurityHeaders() } }));
+
+// Main page (completed with full setup-grid)
+app.get('/', (c) => c.html(getMainPage(c.req.url.hostname), { headers: { 'Content-Type': 'text/html; charset=utf-8', ...getSecurityHeaders() } }));
+
+// DNS Handler (async fetch + cache)
+app.all('/dns-query/:resolve?', async (c) => {
+  const clientIP = c.req.cf?.ip || 'unknown';
+  const startTime = Date.now(); // Already in middleware
+  // Rate limit already in middleware, but DNS-specific if needed
+  if (!checkRateLimit(clientIP, 'dns')) {
+    return jsonResponse({ error: 'محدودیت DNS', message: 'تعداد درخواست بیش از حد' }, 429, getCorsHeaders());
+  }
+  try {
+    let name = c.req.query('name');
+    let type = c.req.query('type') || 'A';
+    let dnsQuery = null;
+    if (c.req.method === 'POST') {
+      const contentType = c.req.header('Content-Type') || '';
+      if (contentType.includes('application/dns-message')) {
+        dnsQuery = new Uint8Array(await c.req.arrayBuffer());
+      }
+    } else {
+      const dnsParam = c.req.query('dns');
+      if (dnsParam) dnsQuery = base64UrlDecode(dnsParam);
+    }
+    if (dnsQuery) return await forwardDNSWireFormat(dnsQuery, getCorsHeaders());
+    if (!name) {
+      return jsonResponse({
+        error: 'پارامتر name ضروری است',
+        examples: { json: '/dns-query?name=google.com&type=A', wire: '/dns-query?dns=BASE64_ENCODED_QUERY' },
+        supported_types: ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS']
+      }, 400, getCorsHeaders());
+    }
+    if (!isValidDomain(name)) {
+      return jsonResponse({ error: 'نام دامنه نامعتبر' }, 400, getCorsHeaders());
+    }
+
+    console.log(`🔍 DNS Query: ${name} (${type}) from ${clientIP}`);
+    const siteType = getSiteType(name);
+    const gaming = c.req.query('gaming') === 'true';
+    let dnsProvider = 'https://cloudflare-dns.com/dns-query';
+    if (gaming && siteType === 'gaming') dnsProvider = 'https://dns.google/dns-query';
+    const queryUrl = `${dnsProvider}?name=${encodeURIComponent(name)}&type=${type}`;
+
+    // Async cache check
+    const cache = caches.default;
+    const cacheKey = new Request(`${c.req.url.origin}/cache/${name}-${type}`);
+    let response = await cache.match(cacheKey);
+    if (!response) {
+      const acceptHeader = c.req.header('Accept') || '';
+      const wantsWireFormat = acceptHeader.includes('application/dns-message');
+      response = await fetch(queryUrl, { // Async fetch
+        headers: { 'Accept': wantsWireFormat ? 'application/dns-message' : 'application/dns-json', 'User-Agent': `Iran-Proxy-${wantsWireFormat ? 'Wire' : 'JSON'}/2.5` }
+      });
+      if (response.ok) {
+        const clone = response.clone();
+        cache.put(cacheKey, clone); // Cache asynchronously
+        response = clone;
+      }
+    }
+
+    if (!response.ok) throw new Error(`DNS failed: ${response.status}`);
+    const contentType = response.headers.get('Content-Type') || '';
+    const data = await (contentType.includes('dns-message') ? response.arrayBuffer() : response.json());
+    const queryTime = Date.now() - startTime;
+
+    // Smart Proxy
+    if (siteType === 'blocked' && typeof data === 'object' && data.Answer) {
+      data.Answer = data.Answer.map(record => {
+        if (record.type === 1) {
+          const cfIP = CONFIG.CF_IPS_V4[Math.floor(Math.random() * CONFIG.CF_IPS_V4.length)];
+          return { ...record, data: cfIP, TTL: 300, _proxied: true };
+        } else if (record.type === 28) {
+          const cfIPv6 = CONFIG.CF_IPS_V6[Math.floor(Math.random() * CONFIG.CF_IPS_V6.length)];
+          return { ...record, data: cfIPv6, TTL: 300, _proxied: true };
+        }
+        return record;
+      });
+    }
+
+    if (typeof data === 'object') {
+      data._iran_proxy = { site_type: siteType, gaming_mode: gaming, query_time_ms:
